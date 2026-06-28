@@ -1,0 +1,90 @@
+{
+  "name": "jarvis-ai-desktop",
+  "productName": "JARVIS AI Desktop",
+  "version": "1.0.0",
+  "description": "A local-first personal AI assistant that learns from your work, builds long-term memory (RAG), and helps automate repetitive workflows.",
+  "author": {
+    "name": "JARVIS AI",
+    "email": "support@example.com"
+  },
+  "license": "MIT",
+  "main": "src/main/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "cross-env JARVIS_ENV=development electron .",
+    "init-db": "node scripts/init-db.js",
+    "rebuild": "electron-rebuild -f -w better-sqlite3",
+    "postinstall": "electron-builder install-app-deps",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win nsis portable --x64",
+    "lint": "node --check src/main/main.js"
+  },
+  "dependencies": {
+    "@xenova/transformers": "^2.17.2",
+    "better-sqlite3": "^11.8.1",
+    "electron-log": "^5.2.0",
+    "electron-store": "^8.2.0",
+    "express": "^4.21.2",
+    "screenshot-desktop": "^1.15.0",
+    "sharp": "^0.33.5",
+    "tesseract.js": "^5.1.1"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^3.7.1",
+    "cross-env": "^7.0.3",
+    "electron": "^31.7.6",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "extends": null,
+    "appId": "com.jarvis.aidesktop",
+    "productName": "JARVIS AI Desktop",
+    "copyright": "Copyright © 2026",
+    "asar": true,
+    "asarUnpack": [
+      "**/node_modules/better-sqlite3/**",
+      "**/node_modules/sharp/**",
+      "**/node_modules/tesseract.js/**",
+      "**/node_modules/tesseract.js-core/**",
+      "**/node_modules/@xenova/**",
+      "**/node_modules/onnxruntime-node/**"
+    ],
+    "files": [
+      "src/**/*",
+      "scripts/**/*",
+      "resources/**/*",
+      "package.json",
+      "!**/*.map",
+      "!extension/**/*",
+      "!docs/**/*"
+    ],
+    "extraResources": [
+      { "from": "extension", "to": "extension" }
+    ],
+    "directories": {
+      "output": "release",
+      "buildResources": "resources"
+    },
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] },
+        { "target": "portable", "arch": ["x64"] }
+      ],
+      "icon": "resources/icon.ico",
+      "artifactName": "${productName}-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false
+    },
+    "portable": {
+      "artifactName": "${productName}-Portable-${version}.${ext}"
+    }
+  }
+}

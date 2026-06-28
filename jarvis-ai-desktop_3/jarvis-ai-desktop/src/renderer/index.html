@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:;" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>JARVIS AI Desktop</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <!-- Sidebar -->
+      <nav class="rail" aria-label="Primary">
+        <div class="brand">
+          <span class="brand-mark">◆</span>
+          <span class="brand-name">JARVIS</span>
+        </div>
+        <button class="nav active" data-view="chat"><span class="nav-ic">❯</span>Ask</button>
+        <button class="nav" data-view="memory"><span class="nav-ic">▤</span>Memory</button>
+        <button class="nav" data-view="timeline"><span class="nav-ic">🕐</span>Timeline</button>
+        <button class="nav" data-view="automation"><span class="nav-ic">⟳</span>Automate</button>
+        <button class="nav" data-view="corrections"><span class="nav-ic">✓</span>Corrections</button>
+        <button class="nav" data-view="settings"><span class="nav-ic">⚙</span>Settings</button>
+        <div class="rail-foot">
+          <div class="status" id="llmStatus"><span class="dot"></span><span id="llmStatusText">checking…</span></div>
+        </div>
+      </nav>
+
+      <!-- Main -->
+      <main class="stage">
+        <div class="alertbar hidden" id="alertBar"></div>
+        <!-- CHAT -->
+        <section class="view" data-view="chat">
+          <header class="view-head">
+            <h1>Ask your memory</h1>
+            <p class="sub">Every answer is searched against your own work first, then grounded by the model.</p>
+          </header>
+          <div class="tagbar" id="tagBar"></div>
+          <div class="chat-scroll" id="chatScroll">
+            <div class="empty" id="chatEmpty">
+              <p class="empty-title">Nothing asked yet.</p>
+              <p>Try: <em>“What was I working on yesterday?”</em> · <em>“Find the SQL query I copied last week.”</em> · <em>“Summarize today’s work.”</em></p>
+            </div>
+          </div>
+          <div class="composer">
+            <textarea id="chatInput" rows="1" placeholder="Ask anything about your work…"></textarea>
+            <button id="chatSend" class="primary">Ask</button>
+          </div>
+        </section>
+
+        <!-- MEMORY -->
+        <section class="view hidden" data-view="memory">
+          <header class="view-head">
+            <h1>Memory</h1>
+            <p class="sub">Everything JARVIS has been allowed to remember.</p>
+          </header>
+          <div class="toolbar">
+            <button id="addDocs" class="primary">Add documents</button>
+            <button id="addNote" class="ghost">Add a note</button>
+            <div class="stats" id="memStats"></div>
+          </div>
+          <div class="filters" id="memFilters">
+            <button class="chip active" data-kind="">All</button>
+            <button class="chip" data-kind="document">Documents</button>
+            <button class="chip" data-kind="conversation">Conversations</button>
+            <button class="chip" data-kind="ocr">Screen / OCR</button>
+            <button class="chip" data-kind="browser">Browser</button>
+            <button class="chip" data-kind="correction">Corrections</button>
+            <button class="chip" data-kind="note">Notes</button>
+          </div>
+          <div class="cards" id="memList"></div>
+        </section>
+
+        <!-- TIMELINE -->
+        <section class="view hidden" data-view="timeline">
+          <header class="view-head">
+            <h1>Timeline</h1>
+            <p class="sub">What you've worked on, newest first. Detected errors are flagged.</p>
+          </header>
+          <div class="timeline" id="timelineList"></div>
+        </section>
+
+        <!-- AUTOMATION -->
+        <section class="view hidden" data-view="automation">
+          <header class="view-head">
+            <h1>Automate</h1>
+            <p class="sub">Describe a repetitive task. JARVIS drafts a script — it never runs anything on its own.</p>
+          </header>
+          <div class="gen">
+            <textarea id="autoDesc" rows="3" placeholder="e.g. Every morning I export the report CSV, rename it with today's date, and move it to the shared drive."></textarea>
+            <div class="gen-row">
+              <select id="autoLang">
+                <option value="python">Python</option>
+                <option value="powershell">PowerShell</option>
+                <option value="batch">Batch (.bat)</option>
+                <option value="playwright">Playwright</option>
+              </select>
+              <button id="autoGen" class="primary">Draft script</button>
+            </div>
+          </div>
+          <div id="autoDetected" class="detected"></div>
+          <pre class="script hidden" id="autoOut"><code></code></pre>
+          <div class="script-actions hidden" id="autoActions">
+            <button id="autoSave" class="primary">Save script…</button>
+            <span class="warn">Review before running. JARVIS will not execute this.</span>
+          </div>
+        </section>
+
+        <!-- CORRECTIONS -->
+        <section class="view hidden" data-view="corrections">
+          <header class="view-head">
+            <h1>Corrections</h1>
+            <p class="sub">Approved corrections outrank everything else in retrieval.</p>
+          </header>
+          <div class="cards" id="corrList"></div>
+        </section>
+
+        <!-- SETTINGS -->
+        <section class="view hidden" data-view="settings">
+          <header class="view-head">
+            <h1>Settings</h1>
+            <p class="sub">Local by default. Capture is off until you turn it on.</p>
+          </header>
+          <div id="settingsBody" class="settings"></div>
+        </section>
+      </main>
+    </div>
+
+    <!-- Correction modal -->
+    <div class="modal-back hidden" id="corrModal">
+      <div class="modal">
+        <h2>What's the correct answer?</h2>
+        <label>Correct answer<textarea id="corrAnswer" rows="3"></textarea></label>
+        <label>Reason<input id="corrReason" type="text" placeholder="Why was the previous answer wrong?" /></label>
+        <label>Category<input id="corrCategory" type="text" placeholder="e.g. kubernetes, sql, process" /></label>
+        <div class="modal-actions">
+          <button class="ghost" id="corrCancel">Cancel</button>
+          <button class="primary" id="corrApprove">Approve & remember</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+    <script src="app.js"></script>
+  </body>
+</html>
