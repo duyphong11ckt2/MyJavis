@@ -50,3 +50,27 @@ Capture is now activity-driven instead of a fixed timer:
 - **Same-screen re-check** — a configurable minimum gap before the same window
   is captured again (Settings → "Same-screen re-check").
 This cuts CPU, battery, and cloud-AI calls a lot while keeping the useful record.
+
+## Smarter assistant (v1.2)
+- **Recurring-error alerts** — when the same error appears repeatedly (threshold
+  configurable in Settings → Errors & alerts), the alert escalates and shows the
+  last known fix from your memory/corrections.
+- **Playbooks** — Automate → "Build playbook from recent activity" turns your
+  recent steps into a reusable SOP, saved (pinned) into Memory.
+- **Link context** — Ask → "Link context" gathers everything connected to a
+  vessel/ticket/person and explains how the pieces relate, with sources.
+- **Draft in my style** — Ask → "Draft in my style" writes a message using your
+  writing samples (Settings → My writing samples) plus your past phrasing.
+- **OPUS specialist** — Settings → OPUS specialist & voice. Injects terminal
+  terminology (BAPLIE, stowage, vessel…) and answers in English by default
+  (language is configurable).
+
+## User profile & role templates
+- **Profile & role** (top of Settings): set your name, role, and a short description
+  of what you do. The assistant reads this on every answer to personalize replies.
+- **Role templates** — one-click presets (QA/Tester, Developer, Operations, PM) that
+  fill the profile and apply sensible defaults. Handy for rolling out to a team.
+- **Analyze & suggest setup** — the assistant reads your description and proposes
+  settings (OPUS mode, error alerts, tone, language) with reasons. Review the
+  checkboxes and apply only what you want.
+- **Answer tone** — Concise / Balanced / Detailed.

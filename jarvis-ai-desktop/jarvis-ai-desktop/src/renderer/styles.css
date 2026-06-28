@@ -84,7 +84,8 @@ body {
 .status.bad .dot { background: var(--bad); }
 
 /* ---- Stage ---- */
-.stage { overflow: hidden; display: flex; flex-direction: column; }
+.stage { overflow: hidden; display: flex; flex-direction: column; position: relative; }
+.view { position: relative; z-index: 2; }
 .view { display: flex; flex-direction: column; height: 100%; padding: 28px 34px; overflow: hidden; }
 .view.hidden { display: none; }
 .view-head h1 { margin: 0; font-size: 22px; font-weight: 650; letter-spacing: -0.01em; }
@@ -291,3 +292,150 @@ button.ghost.mini:hover { color: var(--text); }
 .tl-time  { font-size: calc(12px * var(--ui-scale)); }
 .tl-title { font-size: calc(14px * var(--ui-scale)); }
 .tl-sub   { font-size: calc(11px * var(--ui-scale)); }
+
+/* ===== Intelligence bar + settings textareas ===== */
+.intelbar { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+.intelbar .ghost.mini { background: var(--ink-2); border: 1px solid var(--line); color: var(--text-dim); border-radius: 8px; padding: 5px 11px; font-size: 12px; cursor: pointer; }
+.intelbar .ghost.mini:hover { color: var(--gold); border-color: var(--gold); }
+.row.col { display: block; }
+.row.col .label { margin-bottom: 8px; }
+.setting-area {
+  width: 100%; background: var(--ink-1); border: 1px solid var(--line); color: var(--text);
+  border-radius: 9px; padding: 10px 12px; font-family: var(--sans); font-size: 13px; line-height: 1.5; resize: vertical;
+}
+
+/* ===== Cinematic / epic Iron Man theme ===== */
+/* Animated arc-reactor logo */
+.brand { display: flex; align-items: center; gap: 12px; padding: 6px 8px 18px; }
+.reactor { position: relative; width: 40px; height: 40px; flex: none; }
+.reactor .ring { position: absolute; inset: 0; border-radius: 50%; border: 2px solid transparent; }
+.reactor .r1 { border-top-color: var(--arc); border-right-color: var(--arc); animation: jspin 4s linear infinite; }
+.reactor .r2 { inset: 5px; border-bottom-color: var(--gold); border-left-color: var(--gold); animation: jspinr 6s linear infinite; }
+.reactor .r3 { inset: 10px; border-top-color: var(--red); border-right-color: var(--red); animation: jspin 3s linear infinite; }
+.reactor .core {
+  position: absolute; inset: 15px; border-radius: 50%;
+  background: radial-gradient(circle, #bff4fb 0%, var(--arc) 45%, #0a6b78 100%);
+  box-shadow: 0 0 12px 2px rgba(86, 214, 230, 0.85); animation: jpulse 2.4s ease-in-out infinite;
+}
+.brand-text { display: flex; flex-direction: column; line-height: 1; }
+.brand-name { font-family: var(--hud); font-weight: 900; letter-spacing: 0.16em; font-size: 15px; color: #fff; }
+.brand-sub { font-family: var(--hud); font-weight: 700; font-size: 9px; letter-spacing: 0.3em; color: var(--copper); margin-top: 3px; }
+
+/* HUD corner brackets framing the stage */
+.hud-corner { position: absolute; width: 22px; height: 22px; border: 2px solid var(--arc); opacity: 0.5; z-index: 1; pointer-events: none; }
+.hc1 { top: 10px; left: 10px; border-right: 0; border-bottom: 0; }
+.hc2 { top: 10px; right: 10px; border-left: 0; border-bottom: 0; }
+.hc3 { bottom: 10px; left: 10px; border-right: 0; border-top: 0; }
+.hc4 { bottom: 10px; right: 10px; border-left: 0; border-top: 0; }
+
+/* Faint scanline overlay + rotating reactor watermark */
+.hud-scan {
+  position: absolute; inset: 0; z-index: 1; pointer-events: none; opacity: 0.5;
+  background: repeating-linear-gradient(0deg, rgba(255,255,255,0.02) 0 1px, transparent 1px 4px);
+  mix-blend-mode: overlay;
+}
+.hud-watermark {
+  position: absolute; right: 22px; bottom: 60px; width: 130px; height: 130px; z-index: 0;
+  border-radius: 50%; border: 1px dashed rgba(86, 214, 230, 0.22); opacity: 0.35;
+  pointer-events: none; animation: jspinr 20s linear infinite;
+}
+.hud-watermark::after { content: ""; position: absolute; inset: 24px; border-radius: 50%; border: 1px solid rgba(232, 176, 75, 0.25); }
+
+/* Glowing animated underline under the view title */
+.view-head h1 { display: inline-block; position: relative; }
+.view-head h1::after {
+  content: ""; display: block; height: 2px; width: 200px; margin-top: 7px;
+  background: linear-gradient(90deg, var(--arc), var(--gold), transparent);
+}
+.view-head h1::before {
+  content: ""; position: absolute; bottom: 0; left: 0; width: 50px; height: 2px; z-index: 3;
+  background: linear-gradient(90deg, transparent, #fff, transparent); opacity: 0.75; animation: jsweep 3s linear infinite;
+}
+
+/* Reactor glow on the status LED */
+.status .dot { background: var(--arc); box-shadow: 0 0 8px var(--arc); }
+.status.ok .dot { box-shadow: 0 0 8px var(--good); }
+
+/* ASK button sheen */
+button.primary { position: relative; overflow: hidden; box-shadow: 0 0 16px rgba(232, 146, 15, 0.45); }
+button.primary::after {
+  content: ""; position: absolute; top: 0; left: -60%; width: 45%; height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.55), transparent);
+  transform: skewX(-20deg); animation: jsheen 3.5s linear infinite;
+}
+
+/* Assistant bubble: glowing edge + data-trace running down the left border */
+.msg.assistant .bubble { position: relative; box-shadow: 0 0 18px rgba(0,0,0,0.35); }
+.msg.assistant .bubble::before {
+  content: ""; position: absolute; left: -3px; top: 0; width: 3px; height: 30%;
+  background: #bff4fb; box-shadow: 0 0 10px var(--arc); animation: jtrace 3s ease-in-out infinite;
+}
+
+@keyframes jspin { to { transform: rotate(360deg); } }
+@keyframes jspinr { to { transform: rotate(-360deg); } }
+@keyframes jpulse { 0%,100% { transform: scale(1); opacity: 0.92; } 50% { transform: scale(1.08); opacity: 1; } }
+@keyframes jsweep { 0% { left: -10%; } 100% { left: 200px; } }
+@keyframes jsheen { 0% { left: -60%; } 60%,100% { left: 130%; } }
+@keyframes jtrace { 0%,100% { top: 0; opacity: 0.5; } 50% { top: 65%; opacity: 1; } }
+
+/* ===== Profile suggestions ===== */
+.profile-suggest { margin-top: 10px; }
+.profile-suggest:empty { display: none; }
+.ps-summary { font-size: 13px; color: var(--gold); margin-bottom: 8px; font-weight: 600; }
+.ps-empty { font-size: 12px; color: var(--text-faint); }
+.ps-list { display: flex; flex-direction: column; gap: 8px; }
+.ps-item { display: flex; gap: 9px; align-items: flex-start; background: var(--ink-1); border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px; cursor: pointer; }
+.ps-item input { margin-top: 3px; }
+.ps-item b { color: var(--text); font-size: 13px; font-weight: 600; }
+.ps-reason { display: block; color: var(--text-dim); font-size: 12px; margin-top: 2px; }
+.ps-gloss { margin-top: 8px; font-size: 12px; color: var(--text-dim); background: var(--ink-1); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+button.primary.mini { padding: 6px 13px; font-size: 12px; }
+
+/* ===== Readability pass: brighter text + larger sizes ===== */
+:root {
+  --text: #fbf5ec;       /* primary, brighter */
+  --text-dim: #e9dccd;   /* was #c9a98f — much lighter for contrast */
+  --text-faint: #c7b29a; /* was #8a7058 — readable secondary */
+}
+body { font-size: 15px; }
+
+/* Headings & subtitles */
+.view-head h1 { font-size: 22px; color: #fff; }
+.view-head .sub { font-size: 15px; color: var(--text-dim); }
+.group h3 { font-size: 14px; color: var(--gold); }
+
+/* Settings rows — bigger, higher-contrast */
+#settingsBody .row .label .t { font-size: 16px; color: var(--text); font-weight: 600; }
+#settingsBody .row .label .d { font-size: 14px; color: var(--text-dim); margin-top: 3px; line-height: 1.45; }
+#settingsBody input[type="text"], #settingsBody input[type="password"],
+#settingsBody input[type="number"], #settingsBody textarea, #settingsBody select {
+  font-size: 14px; color: var(--text);
+}
+#settingsBody .group h3 { font-size: 14.5px; }
+
+/* General secondary text that was too dim */
+.row .label .t { font-size: 15px; }
+.row .label .d { font-size: 13.5px; color: var(--text-dim); }
+.card-body { color: var(--text-dim); font-size: 14px; }
+.card-title { font-size: 14px; }
+.card-src, .card-time, .stats { color: var(--text-faint); font-size: 12px; }
+.detected .d { color: var(--text-dim); font-size: 14px; }
+.tl-title { color: var(--text); }
+.tl-sub { color: var(--text-dim); }
+.tl-time { color: var(--text-dim); }
+.chip { color: var(--text-dim); font-size: 13px; }
+.tagbar-label, .tlab { color: var(--text-dim); }
+.empty, .empty-title { color: var(--text-dim); }
+.bubble { font-size: 14.5px; }
+.intelbar .ghost.mini { color: var(--text-dim); }
+.modal label { color: var(--text-dim); font-size: 13px; }
+
+/* Logo: keep spinning even if Windows "show animations" is OFF */
+@media (prefers-reduced-motion: reduce) {
+  .reactor .r1 { animation: jspin 4s linear infinite !important; }
+  .reactor .r2 { animation: jspinr 6s linear infinite !important; }
+  .reactor .r3 { animation: jspin 3s linear infinite !important; }
+  .reactor .core { animation: jpulse 2.4s ease-in-out infinite !important; }
+}
+/* Slightly bolder rings for visibility */
+.reactor .ring { border-width: 2.5px; }

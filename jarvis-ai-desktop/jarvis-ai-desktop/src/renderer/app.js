@@ -448,6 +448,51 @@ $('#tlSummary') && $('#tlSummary').addEventListener('click', async () => {
   }
 });
 
+// ---------- Intelligence actions ----------
+$('#intelConnect') && $('#intelConnect').addEventListener('click', async () => {
+  const entity = (prompt('Link everything about… (e.g. a vessel, ticket, person)') || '').trim();
+  if (!entity) return;
+  goToView('chat');
+  addBubble('user', `Link context: ${entity}`);
+  const { msg, bubble } = addBubble('assistant', 'Connecting the dots…');
+  bubble.classList.add('thinking');
+  try {
+    const res = await jarvis.intel.connections(entity);
+    bubble.classList.remove('thinking');
+    bubble.textContent = res.text;
+    renderSources(msg, res.sources);
+  } catch (e) {
+    bubble.classList.remove('thinking');
+    bubble.textContent = 'Could not link context: ' + e.message;
+  }
+});
+$('#intelDraft') && $('#intelDraft').addEventListener('click', async () => {
+  const goal = (prompt('What should the message say / achieve?') || '').trim();
+  if (!goal) return;
+  goToView('chat');
+  addBubble('user', `Draft: ${goal}`);
+  const { bubble } = addBubble('assistant', 'Drafting in your style…');
+  bubble.classList.add('thinking');
+  try {
+    const res = await jarvis.intel.draft({ goal, channel: 'message' });
+    bubble.classList.remove('thinking');
+    bubble.textContent = res.text;
+  } catch (e) {
+    bubble.classList.remove('thinking');
+    bubble.textContent = 'Could not draft: ' + e.message;
+  }
+});
+$('#playbookBtn') && $('#playbookBtn').addEventListener('click', async () => {
+  const btn = $('#playbookBtn');
+  btn.disabled = true; btn.textContent = 'Building…';
+  try {
+    const r = await jarvis.intel.playbook();
+    if (r.ok) { toast('Playbook saved to Memory.'); }
+    else toast(r.reason === 'not-enough' ? 'Need more recent activity first.' : 'Failed: ' + r.reason);
+  } catch (e) { toast('Failed: ' + e.message); }
+  finally { btn.disabled = false; btn.textContent = '🧭 Build playbook from recent activity'; }
+});
+
 // ---------- Quick-open: triple-Ctrl while focused ----------
 let ctrlTaps = [];
 window.addEventListener('keydown', (e) => {
@@ -475,12 +520,40 @@ function rowText(key, title, desc, cfg, type = 'text') {
 function rowList(key, title, desc, cfg) {
   return rowText(key, title, desc + ' (comma-separated)', { [key]: (cfg[key] || []).join(', ') });
 }
+function rowArea(key, title, desc, cfg) {
+  const val = cfg[key] == null ? '' : cfg[key];
+  return `<div class="row col"><div class="label"><div class="t">${title}</div><div class="d">${desc}</div></div>
+    <textarea data-key="${key}" rows="3" class="setting-area">${escapeHtml(String(val))}</textarea></div>`;
+}
 
 async function loadSettings() {
   const cfg = await jarvis.config.get();
   const diag = await jarvis.diag.server();
   const body = $('#settingsBody');
   body.innerHTML = `
+    <div class="group">
+      <h3>Profile &amp; role</h3>
+      <div class="row"><div class="label"><div class="t">Role template</div><div class="d">Quick-fill for a common role (you can edit after)</div></div>
+        <select id="roleTemplate">
+          <option value="">— choose —</option>
+          <option value="qa">QA / Tester (OPUS)</option>
+          <option value="dev">Developer</option>
+          <option value="ops">Operations</option>
+          <option value="pm">Project Manager</option>
+        </select></div>
+      ${rowText('userName', 'Your name', 'Used to personalize answers', cfg)}
+      ${rowText('userRole', 'Your role', 'e.g. QA tester, Developer, Operations', cfg)}
+      ${rowArea('userProfile', 'About you', 'Describe what you do, your tools, your terminology — the assistant reads this on every answer', cfg)}
+      <div class="row"><div class="label"><div class="t">Answer tone</div><div class="d">How the assistant replies</div></div>
+        <select data-key="profileTone">
+          <option value="concise"${cfg.profileTone === 'concise' ? ' selected' : ''}>Concise</option>
+          <option value="balanced"${cfg.profileTone === 'balanced' ? ' selected' : ''}>Balanced</option>
+          <option value="detailed"${cfg.profileTone === 'detailed' ? ' selected' : ''}>Detailed</option>
+        </select></div>
+      <div class="gen-row" style="margin-top:4px"><button id="profileAnalyze" class="primary mini">✨ Analyze &amp; suggest setup</button></div>
+      <div id="profileSuggest" class="profile-suggest"></div>
+    </div>
+
     <div class="group">
       <h3>AI Provider</h3>
       <div class="row"><div class="label"><div class="t">Provider</div><div class="d">Local Ollama keeps everything on-device.</div></div>
@@ -548,6 +621,21 @@ async function loadSettings() {
     <div class="group">
       <h3>Errors &amp; alerts</h3>
       ${rowToggle('errorAlerts', 'Detect on-screen errors', 'Alert when an error appears and suggest a past fix', cfg)}
+      ${rowText('errorRepeatThreshold', 'Recurring after (times)', 'Flag an error as recurring after this many occurrences in the window', cfg, 'number')}
+      ${rowText('errorRepeatWindowDays', 'Window (days)', 'Count recurrences within this many days', cfg, 'number')}
+    </div>
+
+    <div class="group">
+      <h3>OPUS specialist &amp; voice</h3>
+      ${rowToggle('opusMode', 'OPUS / port mode', 'Use terminal terminology (BAPLIE, stowage, vessel…) when answering', cfg)}
+      <div class="row"><div class="label"><div class="t">Answer language</div><div class="d">Language the in-app assistant replies in</div></div>
+        <select data-key="answerLanguage">
+          <option value="en"${cfg.answerLanguage === 'en' ? ' selected' : ''}>English</option>
+          <option value="vi"${cfg.answerLanguage === 'vi' ? ' selected' : ''}>Vietnamese</option>
+          <option value="auto"${cfg.answerLanguage === 'auto' ? ' selected' : ''}>Match my question</option>
+        </select></div>
+      ${rowArea('opusGlossary', 'OPUS glossary', 'Domain terms fed to the assistant — edit to fit your terminal', cfg)}
+      ${rowArea('writingSamples', 'My writing samples', 'Paste a few of your typical messages so drafts match your style', cfg)}
     </div>
 
     <div class="group">
@@ -567,7 +655,7 @@ async function loadSettings() {
   $$('#settingsBody input[type="checkbox"]').forEach((el) =>
     el.addEventListener('change', () => jarvis.config.patch({ [el.dataset.key]: el.checked }).then(refreshLlmStatus))
   );
-  $$('#settingsBody input[type="text"], #settingsBody input[type="password"], #settingsBody input[type="number"], #settingsBody input[type="range"], #settingsBody select').forEach((el) => {
+  $$('#settingsBody input[type="text"], #settingsBody input[type="password"], #settingsBody input[type="number"], #settingsBody input[type="range"], #settingsBody textarea, #settingsBody select').forEach((el) => {
     if (el.readOnly) return;
     el.addEventListener('change', () => {
       let key = el.dataset.key;
@@ -593,11 +681,102 @@ async function loadSettings() {
     toast(r.removed ? `Removed ${r.removed} old item(s).` : 'Nothing to remove.');
   });
   renderTagManage(cfg);
+  wireProfile();
   $('#wipeBtn').addEventListener('click', async () => {
     if (!confirm('Delete ALL stored memories permanently?')) return;
     await jarvis.privacy.wipe();
     toast('All memories deleted.');
     loadMemory();
+  });
+}
+
+// ---------- Profile & role templates ----------
+const ROLE_TEMPLATES = {
+  qa: {
+    userRole: 'QA / Tester',
+    userProfile: 'I test the OPUS Terminal application (Webix-based). I run validation suites, check BAPLIE/stowage screens, and report defects. I work closely with an existing QC team.',
+    patch: { opusMode: true, errorAlerts: true, profileTone: 'concise', answerLanguage: 'en' }
+  },
+  dev: {
+    userRole: 'Developer',
+    userProfile: 'I build and maintain software. I care about code, APIs, debugging, and technical detail.',
+    patch: { opusMode: false, errorAlerts: true, profileTone: 'detailed', answerLanguage: 'en' }
+  },
+  ops: {
+    userRole: 'Operations',
+    userProfile: 'I handle day-to-day terminal operations: vessels, stowage, yard, gate, and incident handling in OPUS.',
+    patch: { opusMode: true, errorAlerts: true, profileTone: 'concise', answerLanguage: 'en' }
+  },
+  pm: {
+    userRole: 'Project Manager',
+    userProfile: 'I coordinate work, track tickets and timelines, and communicate with stakeholders.',
+    patch: { opusMode: false, errorAlerts: false, profileTone: 'balanced', answerLanguage: 'en' }
+  }
+};
+
+function wireProfile() {
+  const tpl = $('#roleTemplate');
+  tpl && tpl.addEventListener('change', async (e) => {
+    const t = ROLE_TEMPLATES[e.target.value];
+    if (!t) return;
+    await jarvis.config.patch({ userRole: t.userRole, userProfile: t.userProfile, ...t.patch });
+    toast('Template applied. You can edit the fields.');
+    loadSettings();
+  });
+
+  const btn = $('#profileAnalyze');
+  btn && btn.addEventListener('click', async () => {
+    const profile = ($('[data-key="userProfile"]') || {}).value || '';
+    const box = $('#profileSuggest');
+    if (!profile.trim()) { box.innerHTML = '<div class="ps-empty">Write a short description above first.</div>'; return; }
+    btn.disabled = true; btn.textContent = 'Analyzing…';
+    try {
+      const r = await jarvis.intel.profileSuggest(profile);
+      if (!r.ok) { box.innerHTML = `<div class="ps-empty">Could not analyze (${r.reason || 'error'}).</div>`; return; }
+      renderProfileSuggest(box, r);
+    } catch (e) {
+      box.innerHTML = `<div class="ps-empty">Failed: ${escapeHtml(e.message)}</div>`;
+    } finally {
+      btn.disabled = false; btn.textContent = '✨ Analyze & suggest setup';
+    }
+  });
+}
+
+function renderProfileSuggest(box, r) {
+  const labels = { opusMode: 'OPUS / port mode', errorAlerts: 'On-screen error alerts', answerLanguage: 'Answer language', profileTone: 'Answer tone' };
+  let html = r.summary ? `<div class="ps-summary">${escapeHtml(r.summary)}</div>` : '';
+  if (r.suggestions && r.suggestions.length) {
+    html += '<div class="ps-list">';
+    r.suggestions.forEach((s, i) => {
+      const val = typeof s.value === 'boolean' ? (s.value ? 'On' : 'Off') : String(s.value);
+      html += `<label class="ps-item"><input type="checkbox" data-i="${i}" checked>
+        <span><b>${escapeHtml(labels[s.key] || s.key)}: ${escapeHtml(val)}</b>
+        ${s.reason ? `<span class="ps-reason">${escapeHtml(s.reason)}</span>` : ''}</span></label>`;
+    });
+    html += '</div>';
+  }
+  if (r.glossaryAdditions) html += `<div class="ps-gloss">Suggested glossary: ${escapeHtml(String(r.glossaryAdditions).slice(0, 200))}</div>`;
+  html += '<div class="gen-row" style="margin-top:8px"><button id="psApply" class="primary mini">Apply selected</button></div>';
+  box.innerHTML = html;
+
+  $('#psApply') && $('#psApply').addEventListener('click', async () => {
+    const patch = {};
+    $$('#profileSuggest .ps-item input:checked').forEach((cb) => {
+      const s = r.suggestions[+cb.dataset.i];
+      if (s) patch[s.key] = s.value;
+    });
+    if (r.tags && r.tags.length) {
+      const cfg = await jarvis.config.get();
+      const merged = Array.from(new Set([...(cfg.tags || []), ...r.tags]));
+      patch.tags = merged;
+    }
+    if (r.glossaryAdditions) {
+      const cfg = await jarvis.config.get();
+      patch.opusGlossary = ((cfg.opusGlossary || '') + ' ' + r.glossaryAdditions).trim();
+    }
+    await jarvis.config.patch(patch);
+    toast('Applied. Settings updated.');
+    loadSettings();
   });
 }
 
@@ -668,8 +847,11 @@ jarvis.onEvent((p) => {
   }
   if (p.type === 'error-detected') {
     const errs = (p.errors || []).join('; ');
-    const sug = p.suggestion ? `<br><span class="alert-sug">Suggestion: ${escapeHtml(String(p.suggestion).slice(0, 160))}</span>` : '';
-    showAlert(`<b>Error detected${p.app ? ' in ' + escapeHtml(p.app) : ''}:</b> ${escapeHtml(errs.slice(0, 160))}${sug}`, true);
+    const sug = p.suggestion ? `<br><span class="alert-sug">Last fix: ${escapeHtml(String(p.suggestion).slice(0, 160))}</span>` : '';
+    const head = p.recurring
+      ? `<b>⚠ Recurring error (${p.recurCount}× this week)${p.app ? ' in ' + escapeHtml(p.app) : ''}:</b>`
+      : `<b>Error detected${p.app ? ' in ' + escapeHtml(p.app) : ''}:</b>`;
+    showAlert(`${head} ${escapeHtml(errs.slice(0, 160))}${sug}`, true);
   }
 });
 

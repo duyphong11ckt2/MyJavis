@@ -188,6 +188,23 @@ function timeline(limit = 200) {
     .all(limit);
 }
 
+/** Count stored error captures whose signature matches, since a timestamp (#1). */
+function countErrorsBySig(sig, sinceTs) {
+  if (!sig) return 0;
+  const d = get();
+  try {
+    return d
+      .prepare(
+        `SELECT COUNT(*) c FROM memories
+         WHERE kind='ocr' AND created_at >= ?
+           AND json_extract(metadata,'$.errorSig') = ?`
+      )
+      .get(sinceTs, sig).c;
+  } catch (_) {
+    return 0;
+  }
+}
+
 function stats() {
   const d = get();
   const count = (t) => d.prepare(`SELECT COUNT(*) c FROM ${t}`).get().c;
@@ -201,4 +218,4 @@ function stats() {
   };
 }
 
-module.exports = { open, get, wipeAll, stats, purgeOld, timeline };
+module.exports = { open, get, wipeAll, stats, purgeOld, timeline, countErrorsBySig };

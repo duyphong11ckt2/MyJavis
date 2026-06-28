@@ -20,6 +20,7 @@
 const config = require('./config');
 const privacy = require('./privacy');
 const memory = require('./memory');
+const db = require('./db');
 const ocr = require('./ocr');
 const llm = require('./llm');
 const activeWindow = require('./activeWindow');
@@ -120,6 +121,18 @@ function filterRealErrors(errors, fullText) {
   return kept;
 }
 
+/** Stable signature for an error so recurrences can be counted (#1). */
+function errorSignature(errors) {
+  return (errors || [])
+    .join(' ')
+    .toLowerCase()
+    .replace(/[0-9]+/g, '#') // ignore specific IDs/numbers
+    .replace(/[^a-z#\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 80);
+}
+
 async function extractStructured(text) {
   if (!text || text.length < 12) return null;
   try {
@@ -140,7 +153,7 @@ async function extractStructured(text) {
  * Surface a detected on-screen error: look for a past fix in memory/corrections,
  * show a desktop notification, and emit an event for the UI.
  */
-async function raiseErrorAlert(errors, structured) {
+async function raiseErrorAlert(errors, structured, errorSig) {
   const summary = errors.join('; ').slice(0, 200);
   let suggestion = '';
   try {
@@ -149,13 +162,26 @@ async function raiseErrorAlert(errors, structured) {
     if (best) suggestion = String(best.content).slice(0, 240);
   } catch (_) {}
 
+  // (#1) How many times has this same error appeared recently?
+  let recurCount = 1;
+  try {
+    const windowDays = config.read('errorRepeatWindowDays') || 7;
+    const since = Date.now() - windowDays * 24 * 60 * 60 * 1000;
+    recurCount = db.countErrorsBySig(errorSig, since) || 1;
+  } catch (_) {}
+  const threshold = config.read('errorRepeatThreshold') || 3;
+  const recurring = recurCount >= threshold;
+
   try {
     if (config.read('notifications')) {
       const { Notification } = require('electron');
+      const title = recurring
+        ? `JARVIS: recurring error (${recurCount}× this week)`
+        : 'JARVIS: error detected on screen';
       const body = suggestion
-        ? `${summary}\n\nSeen before — suggestion: ${suggestion}`
+        ? `${summary}\n\nSeen before — last fix: ${suggestion}`
         : summary;
-      new Notification({ title: 'JARVIS: error detected on screen', body }).show();
+      new Notification({ title, body }).show();
     }
   } catch (_) {}
 
@@ -164,9 +190,11 @@ async function raiseErrorAlert(errors, structured) {
     app: structured?.application || null,
     task: structured?.current_task || null,
     errors,
-    suggestion
+    suggestion,
+    recurring,
+    recurCount
   });
-  log.info('Error alert raised: ' + summary);
+  log.info(`Error alert raised (${recurCount}×${recurring ? ', recurring' : ''}): ${summary}`);
 }
 
 async function processFrame() {
@@ -225,6 +253,7 @@ async function processFrame() {
     const activeTag = config.read('activeTag') || null; // project label (#6)
     const realErrors = filterRealErrors(structured && structured.errors, text); // (A) real errors only
     const hasError = realErrors.length > 0;
+    const errorSig = hasError ? errorSignature(realErrors) : null;
 
     // (B) Deduplicate: skip if this is the same app+task as the last stored frame
     // within a short window (avoids many near-identical rows for one screen).
@@ -265,15 +294,16 @@ async function processFrame() {
         changeRatio: Number(changed.toFixed(3)),
         app: win.app || null,
         isError: hasError,
-        errors: hasError ? realErrors : []
+        errors: hasError ? realErrors : [],
+        errorSig: errorSig
       }
     });
     lastStored = { appKey, taskKey, ts: nowTs };
     lastCaptureTs = nowTs;
 
-    // Error detection (#7): alert + suggest a fix from past memory/corrections.
+    // Error detection (#7) + recurring-error escalation (#1).
     if (hasError && config.read('errorAlerts')) {
-      await raiseErrorAlert(realErrors, structured);
+      await raiseErrorAlert(realErrors, structured, errorSig);
     }
 
     onEvent({ type: 'screenshot-learned', app: structured?.application, task: structured?.current_task });

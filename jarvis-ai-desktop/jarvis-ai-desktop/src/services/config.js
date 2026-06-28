@@ -68,6 +68,28 @@ const DEFAULTS = {
   // --- Error detection (#7) ------------------------------------------------
   // When screen text contains errors, raise a desktop alert and tag the memory.
   errorAlerts: true,
+  errorRepeatThreshold: 3, // alert "recurring" when same error seen this many times
+  errorRepeatWindowDays: 7, // ...within this many days
+
+  // --- OPUS specialist + answer language -----------------------------------
+  opusMode: true, // inject port/terminal terminology and domain framing
+  answerLanguage: 'en', // 'en' | 'vi' | 'auto' — language the in-app assistant replies in
+  opusGlossary:
+    'OPUS Terminal is a container terminal operating system. Key terms: ' +
+    'BAPLIE (bay plan / stowage EDI message listing container positions on a vessel); ' +
+    'stowage (how containers are arranged on a vessel by bay/row/tier); ' +
+    'vessel (ship), voyage, berth, yard, gantry/quay crane; ' +
+    'hsheet (hatch/stowage editing grid); EDI, COPRAR, CODECO, MOVINS messages; ' +
+    'discharge/load, reefer, IMDG (dangerous goods), T/O (truck-out), gate, CY (container yard).',
+
+  // --- Writing style (draft in my voice) -----------------------------------
+  writingSamples: '', // user-provided samples of their own writing, used when drafting
+
+  // --- User profile (personalization) --------------------------------------
+  userName: '',
+  userRole: '', // free text, e.g. "QA tester", "Developer"
+  userProfile: '', // free description the assistant reads on every answer
+  profileTone: 'balanced', // 'concise' | 'balanced' | 'detailed'
 
   // --- Quick-open hotkey ---------------------------------------------------
   // Global accelerator (works anywhere). Triple-Ctrl works while focused.

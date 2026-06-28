@@ -166,6 +166,75 @@ function register({ emit }) {
     }
   });
 
+  // ---- Intelligence: connections, playbook, draft ----
+  ipcMain.handle('context:entity', (_e, entity) => memory.connections(String(entity || '').trim()));
+  ipcMain.handle('profile:suggest', async (_e, profileText) => {
+    const text = String(profileText || '').trim();
+    if (!text) return { ok: false, reason: 'empty' };
+    const sys =
+      'You configure a personal desktop AI assistant based on a user profile. ' +
+      'Return STRICT JSON only, no prose, with this shape:\n' +
+      '{"summary":"one line","suggestions":[{"key":"opusMode","value":true,"reason":"..."}],' +
+      '"tags":["..."],"glossaryAdditions":"..."}\n' +
+      'Allowed keys for suggestions: opusMode (boolean), errorAlerts (boolean), ' +
+      'answerLanguage ("en"|"vi"), profileTone ("concise"|"balanced"|"detailed"). ' +
+      'Only include suggestions that clearly fit the profile. Keep reasons short.';
+    try {
+      const { text: out } = await llm.chat({
+        system: sys,
+        messages: [{ role: 'user', content: `USER PROFILE:\n${text}\n\nReturn the JSON.` }]
+      });
+      const clean = out.replace(/```json|```/g, '').trim();
+      let parsed;
+      try { parsed = JSON.parse(clean); }
+      catch (_) {
+        const m = clean.match(/\{[\s\S]*\}/);
+        parsed = m ? JSON.parse(m[0]) : null;
+      }
+      if (!parsed) return { ok: false, reason: 'parse' };
+      const allow = { opusMode: 'boolean', errorAlerts: 'boolean', answerLanguage: 'string', profileTone: 'string' };
+      parsed.suggestions = (parsed.suggestions || []).filter(
+        (s) => s && allow[s.key] && typeof s.value === allow[s.key]
+      );
+      return { ok: true, ...parsed };
+    } catch (e) {
+      return { ok: false, reason: e.message };
+    }
+  });
+  ipcMain.handle('draft:reply', (_e, payload) => memory.draftReply(payload || {}));
+  ipcMain.handle('playbook:fromRecent', async () => {
+    // Build a reusable SOP from recent screen/workflow steps.
+    const rows = db.timeline(60).filter((r) => r.kind === 'ocr' || r.kind === 'conversation');
+    if (rows.length < 4) return { ok: false, reason: 'not-enough' };
+    const steps = rows
+      .slice(0, 40)
+      .reverse()
+      .map((r) => `- ${r.source || r.kind}: ${r.title || ''}`)
+      .join('\n');
+    try {
+      const { text } = await llm.chat({
+        system:
+          'You turn a sequence of observed work steps into a clean, reusable ' +
+          'Standard Operating Procedure (SOP). Output: a short title line, then ' +
+          'numbered steps. Merge duplicates, keep it general and practical. English.',
+        messages: [{ role: 'user', content: `Observed steps (oldest first):\n${steps}\n\nWrite the SOP.` }]
+      });
+      const title = (text.split('\n')[0] || 'Playbook').replace(/^#+\s*/, '').slice(0, 80);
+      await memory.ingest({
+        kind: 'note',
+        source: 'playbook',
+        title: `Playbook: ${title}`,
+        content: text,
+        pinned: 1,
+        tag: config.read('activeTag') || null
+      });
+      notify('Playbook saved', 'A reusable procedure was added to memory.');
+      return { ok: true, text };
+    } catch (e) {
+      return { ok: false, reason: e.message };
+    }
+  });
+
   // ---- Detected errors (#7) ----
   ipcMain.handle('errors:recent', () => {
     try {
