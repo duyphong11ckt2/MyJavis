@@ -27,6 +27,8 @@ const DEFAULTS = {
   screenshotChangeThreshold: 0.12, // 0..1 perceptual-diff ratio to count as "meaningful"
   screenshotMinIntervalMs: 4000, // never sample faster than this even on change
   screenshotDedupeMs: 120000, // skip identical app+task captures within this window
+  captureIdlePauseSec: 60, // pause capture when no keyboard/mouse for this long (#2)
+  captureSameWindowMs: 90000, // on the same window, re-check at most this often (#3)
   clipboardHistory: false,
   browserHistory: false,
 

@@ -28,6 +28,8 @@ const { log } = require('./logger');
 let timer = null;
 let lastHash = null;
 let lastStored = null; // { appKey, taskKey, ts } for dedupe
+let lastWindowKey = null; // app|title of last checked window (#3)
+let lastCaptureTs = 0; // when we last took a real screenshot (#2/#3)
 let busy = false;
 let onEvent = () => {};
 
@@ -171,25 +173,47 @@ async function processFrame() {
   if (busy) return;
   busy = true;
   try {
-    const buf = await captureScreen();
-    const hash = await perceptualHash(buf);
-    const changed = hammingRatio(lastHash, hash);
-    const threshold = config.read('screenshotChangeThreshold') ?? 0.12;
+    // (#2) Pause when the user is away. powerMonitor.getSystemIdleTime() is
+    // built into Electron (no native module) and returns seconds since the last
+    // keyboard/mouse input. If idle beyond the threshold, do nothing this tick.
+    let idleSec = 0;
+    try { idleSec = require('electron').powerMonitor.getSystemIdleTime(); } catch (_) {}
+    const idlePause = config.read('captureIdlePauseSec') ?? 60;
+    if (idlePause > 0 && idleSec >= idlePause) { busy = false; return; }
 
-    if (lastHash && changed < threshold) {
-      busy = false;
-      return; // not a meaningful change
-    }
-    lastHash = hash;
-
-    // Active-app gating (#1): skip excluded apps / sensitive window titles.
+    // (#3) Cheap active-window check BEFORE taking any screenshot.
     const win = await activeWindow.current(); // { app, title } on Windows; {} elsewhere
     const ctx = { app: win.app, title: win.title };
     if (!privacy.allow(ctx)) {
       log.info(`Skipped capture (excluded): ${win.app || ''} ${win.title || ''}`.trim());
+      lastWindowKey = `${(win.app || '').toLowerCase()}|${(win.title || '').toLowerCase()}`;
       busy = false;
       return;
     }
+
+    const winKey = `${(win.app || '').toLowerCase()}|${(win.title || '').toLowerCase()}`;
+    const windowChanged = winKey !== lastWindowKey;
+    const sameWindowMs = config.read('captureSameWindowMs') ?? 90000;
+    const sinceCapture = Date.now() - (lastCaptureTs || 0);
+
+    // Only spend a screenshot when the window changed, or enough time has passed
+    // to re-check the same window. Otherwise skip cheaply (no screen grab).
+    if (!windowChanged && sinceCapture < sameWindowMs) {
+      busy = false;
+      return;
+    }
+    lastWindowKey = winKey;
+
+    const buf = await captureScreen();
+    const hash = await perceptualHash(buf);
+    const changed = hammingRatio(lastHash, hash);
+    const threshold = config.read('screenshotChangeThreshold') ?? 0.12;
+    // Same window: require a real visual change. New window: always proceed.
+    if (!windowChanged && lastHash && changed < threshold) {
+      busy = false;
+      return;
+    }
+    lastHash = hash;
 
     const text = await ocr.recognize(buf);
     if (!text) {
@@ -245,6 +269,7 @@ async function processFrame() {
       }
     });
     lastStored = { appKey, taskKey, ts: nowTs };
+    lastCaptureTs = nowTs;
 
     // Error detection (#7): alert + suggest a fix from past memory/corrections.
     if (hasError && config.read('errorAlerts')) {
@@ -273,6 +298,8 @@ function stop() {
   timer = null;
   lastHash = null;
   lastStored = null;
+  lastWindowKey = null;
+  lastCaptureTs = 0;
   log.info('Screenshot learning stopped.');
 }
 

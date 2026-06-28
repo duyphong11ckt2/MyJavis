@@ -499,6 +499,10 @@ async function loadSettings() {
       ${rowToggle('screenshotLearning', 'Screenshot learning', 'Capture only on meaningful screen changes, store structured text', cfg)}
       ${rowToggle('clipboardHistory', 'Clipboard history', 'Remember copied text', cfg)}
       ${rowToggle('browserHistory', 'Browser history', 'Remember pages sent by the extension', cfg)}
+      <div class="row"><div class="label"><div class="t">Pause when idle (seconds)</div><div class="d">Stop capturing if no keyboard/mouse for this long. 0 = always on</div></div>
+        <input type="range" min="0" max="300" step="15" data-key="captureIdlePauseSec" value="${cfg.captureIdlePauseSec ?? 60}"/></div>
+      <div class="row"><div class="label"><div class="t">Same-screen re-check (seconds)</div><div class="d">Higher = lighter. Only re-captures the same window this often</div></div>
+        <input type="range" min="15" max="300" step="15" data-key="captureSameWindowSec" value="${Math.round((cfg.captureSameWindowMs||90000)/1000)}"/></div>
       <div class="row"><div class="label"><div class="t">Change sensitivity</div><div class="d">Lower = captures more often; higher = only big changes</div></div>
         <input type="range" min="0.04" max="0.30" step="0.02" data-key="screenshotChangeThreshold" value="${cfg.screenshotChangeThreshold}"/></div>
       <div class="row"><div class="label"><div class="t">Min interval (seconds)</div><div class="d">Never sample faster than this</div></div>
@@ -573,6 +577,9 @@ async function loadSettings() {
       } else if (key === 'screenshotMinIntervalSec') {
         key = 'screenshotMinIntervalMs';
         val = Math.max(2000, (parseInt(el.value, 10) || 4) * 1000);
+      } else if (key === 'captureSameWindowSec') {
+        key = 'captureSameWindowMs';
+        val = Math.max(15000, (parseInt(el.value, 10) || 90) * 1000);
       } else if (el.type === 'range') {
         val = parseFloat(el.value);
       } else if (el.type === 'number') {

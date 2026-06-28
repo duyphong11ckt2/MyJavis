@@ -40,3 +40,13 @@ entry (it's pinned so cleanup won't remove it). Toggle under
 > app is in the background) needs a system keyboard hook that isn't bundled in
 > this build, so the global trigger is a key combo. Triple-Ctrl works while the
 > window is focused.
+
+## Efficient capture (data/battery saver)
+Capture is now activity-driven instead of a fixed timer:
+- **Pauses when you're away** — if there's no keyboard/mouse for a while
+  (Settings → Capture → "Pause when idle"), it stops capturing entirely.
+- **Captures on window/app change** — switching from Excel to Jira to Chrome
+  triggers a capture; sitting on one screen does not keep re-capturing.
+- **Same-screen re-check** — a configurable minimum gap before the same window
+  is captured again (Settings → "Same-screen re-check").
+This cuts CPU, battery, and cloud-AI calls a lot while keeping the useful record.
