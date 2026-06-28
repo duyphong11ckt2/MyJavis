@@ -137,6 +137,71 @@ function register({ emit }) {
   // ---- Timeline (#4) ----
   ipcMain.handle('timeline:get', (_e, limit) => db.timeline(limit || 200));
 
+  // ---- Daily summary (F) ----
+  ipcMain.handle('summary:today', async () => {
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const rows = db
+      .timeline(500)
+      .filter((r) => r.created_at >= startOfDay.getTime());
+    if (!rows.length) return { text: 'No activity recorded today yet.' };
+    const lines = rows
+      .slice(0, 120)
+      .map((r) => {
+        const t = new Date(r.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        return `${t} — ${r.source || r.kind}: ${r.title || ''}`;
+      })
+      .join('\n');
+    try {
+      const { text } = await llm.chat({
+        system:
+          'You summarize the user\'s work day from a timeline of app/screen activity. ' +
+          'Write a short, friendly recap grouped by theme (3-7 bullet points). ' +
+          'Focus on what they actually worked on; ignore noise and duplicates. Be concise.',
+        messages: [{ role: 'user', content: `Today's activity:\n${lines}\n\nWrite the recap.` }]
+      });
+      return { text };
+    } catch (e) {
+      return { text: 'Could not reach the model to summarize. Raw activity:\n\n' + lines.slice(0, 1500) };
+    }
+  });
+
+  // ---- Intelligence: connections, playbook, draft ----
+  ipcMain.handle('context:entity', (_e, entity) => memory.connections(String(entity || '').trim()));
+  ipcMain.handle('draft:reply', (_e, payload) => memory.draftReply(payload || {}));
+  ipcMain.handle('playbook:fromRecent', async () => {
+    // Build a reusable SOP from recent screen/workflow steps.
+    const rows = db.timeline(60).filter((r) => r.kind === 'ocr' || r.kind === 'conversation');
+    if (rows.length < 4) return { ok: false, reason: 'not-enough' };
+    const steps = rows
+      .slice(0, 40)
+      .reverse()
+      .map((r) => `- ${r.source || r.kind}: ${r.title || ''}`)
+      .join('\n');
+    try {
+      const { text } = await llm.chat({
+        system:
+          'You turn a sequence of observed work steps into a clean, reusable ' +
+          'Standard Operating Procedure (SOP). Output: a short title line, then ' +
+          'numbered steps. Merge duplicates, keep it general and practical. English.',
+        messages: [{ role: 'user', content: `Observed steps (oldest first):\n${steps}\n\nWrite the SOP.` }]
+      });
+      const title = (text.split('\n')[0] || 'Playbook').replace(/^#+\s*/, '').slice(0, 80);
+      await memory.ingest({
+        kind: 'note',
+        source: 'playbook',
+        title: `Playbook: ${title}`,
+        content: text,
+        pinned: 1,
+        tag: config.read('activeTag') || null
+      });
+      notify('Playbook saved', 'A reusable procedure was added to memory.');
+      return { ok: true, text };
+    } catch (e) {
+      return { ok: false, reason: e.message };
+    }
+  });
+
   // ---- Detected errors (#7) ----
   ipcMain.handle('errors:recent', () => {
     try {

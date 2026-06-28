@@ -26,6 +26,12 @@ contextBridge.exposeInMainWorld('jarvis', {
     cleanupNow: () => invoke('memory:cleanupNow')
   },
   timeline: { get: (limit) => invoke('timeline:get', limit) },
+  summary: { today: () => invoke('summary:today') },
+  intel: {
+    connections: (entity) => invoke('context:entity', entity),
+    draft: (payload) => invoke('draft:reply', payload),
+    playbook: () => invoke('playbook:fromRecent')
+  },
   errors: { recent: () => invoke('errors:recent') },
   automation: {
     detect: () => invoke('automation:detect'),

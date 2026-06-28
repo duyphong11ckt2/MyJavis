@@ -1,5 +1,5 @@
 'use strict';
-const { app, globalShortcut } = require('electron');
+const { app, globalShortcut, nativeTheme, Menu } = require('electron');
 const { init: initLog, log } = require('../services/logger');
 initLog(app);
 
@@ -24,6 +24,10 @@ if (!gotLock) {
   lifecycle.installFatalHandler();
 
   app.whenReady().then(async () => {
+    // Dark window chrome to match the app; drop the light native menu bar.
+    try { nativeTheme.themeSource = 'dark'; } catch (_) {}
+    try { Menu.setApplicationMenu(null); } catch (_) {}
+
     const checks = lifecycle.startupChecks();
     if (!checks.ok) {
       log.error('Startup checks failed; continuing in degraded mode.');

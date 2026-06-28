@@ -313,32 +313,94 @@ function dayLabel(ms) {
   if (d.toDateString() === y.toDateString()) return 'Yesterday';
   return d.toLocaleDateString();
 }
+function hm(ms) {
+  return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+let tlRows = [];
+let tlGroup = false;
+let tlQuery = '';
+
+function parseMeta(r) {
+  try { return JSON.parse(r.metadata || '{}'); } catch (_) { return {}; }
+}
+
+function tlMatches(r) {
+  if (!tlQuery) return true;
+  const hay = `${r.title || ''} ${r.source || ''} ${r.kind || ''} ${r.tag || ''}`.toLowerCase();
+  return hay.includes(tlQuery);
+}
+
+/** Group consecutive rows (newest-first) that share the same app/source into a
+ *  session, when the time gap is small. Returns {source, start, end, count, isError, tag}. */
+function buildSessions(rows) {
+  const GAP = 10 * 60 * 1000; // 10 min gap breaks a session
+  const out = [];
+  for (const r of rows) {
+    const meta = parseMeta(r);
+    const key = (r.source || r.kind || '').toLowerCase();
+    const last = out[out.length - 1];
+    if (last && last.key === key && last.minTs - r.created_at < GAP) {
+      last.minTs = Math.min(last.minTs, r.created_at);
+      last.count++;
+      last.isError = last.isError || !!meta.isError;
+      if (!last.titles.includes(r.title) && r.title) last.titles.push(r.title);
+    } else {
+      out.push({
+        key, source: r.source || r.kind, tag: r.tag,
+        maxTs: r.created_at, minTs: r.created_at, count: 1,
+        isError: !!meta.isError, titles: r.title ? [r.title] : []
+      });
+    }
+  }
+  return out;
+}
 
 async function loadTimeline() {
-  const rows = await jarvis.timeline.get(200);
+  const rows = await jarvis.timeline.get(300);
+  tlRows = rows || [];
+  renderTimeline();
+}
+
+function renderTimeline() {
   const list = $('#timelineList');
   list.innerHTML = '';
+  const rows = tlRows.filter(tlMatches);
   if (!rows.length) {
-    list.innerHTML = `<div class="empty" style="margin:40px auto">Nothing recorded yet. Turn on Screenshot learning and work for a bit.</div>`;
+    list.innerHTML = `<div class="empty" style="margin:40px auto">${tlQuery ? 'No matches.' : 'Nothing recorded yet. Turn on Screenshot learning and work for a bit.'}</div>`;
     return;
   }
+
+  if (tlGroup) {
+    let lastDay = null;
+    buildSessions(rows).forEach((s) => {
+      const day = dayLabel(s.maxTs);
+      if (day !== lastDay) { lastDay = day; addDay(list, day); }
+      const item = document.createElement('div');
+      item.className = 'tl-item' + (s.isError ? ' error' : '');
+      const span = s.minTs === s.maxTs ? hm(s.maxTs) : `${hm(s.minTs)}–${hm(s.maxTs)}`;
+      const titles = s.titles.slice(0, 2).join(' · ');
+      item.innerHTML = `
+        <div class="tl-time">${span}</div>
+        <div class="tl-dot"></div>
+        <div class="tl-body">
+          <div class="tl-title">${s.isError ? '⚠ ' : ''}${escapeHtml(s.source)}${s.tag ? ` <span class="tl-tag">${escapeHtml(s.tag)}</span>` : ''} <span class="tl-count">${s.count}×</span></div>
+          <div class="tl-sub">${escapeHtml(titles || '')}</div>
+        </div>`;
+      list.appendChild(item);
+    });
+    return;
+  }
+
   let lastDay = null;
   rows.forEach((r) => {
-    let meta = {};
-    try { meta = JSON.parse(r.metadata || '{}'); } catch (_) {}
+    const meta = parseMeta(r);
     const day = dayLabel(r.created_at);
-    if (day !== lastDay) {
-      lastDay = day;
-      const h = document.createElement('div');
-      h.className = 'tl-day';
-      h.textContent = day;
-      list.appendChild(h);
-    }
+    if (day !== lastDay) { lastDay = day; addDay(list, day); }
     const item = document.createElement('div');
     item.className = 'tl-item' + (meta.isError ? ' error' : '');
-    const time = new Date(r.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     item.innerHTML = `
-      <div class="tl-time">${time}</div>
+      <div class="tl-time">${hm(r.created_at)}</div>
       <div class="tl-dot"></div>
       <div class="tl-body">
         <div class="tl-title">${meta.isError ? '⚠ ' : ''}${escapeHtml(r.title || r.source || r.kind)}${r.tag ? ` <span class="tl-tag">${escapeHtml(r.tag)}</span>` : ''}</div>
@@ -347,6 +409,89 @@ async function loadTimeline() {
     list.appendChild(item);
   });
 }
+
+function addDay(list, day) {
+  const h = document.createElement('div');
+  h.className = 'tl-day';
+  h.textContent = day;
+  list.appendChild(h);
+}
+
+function applyFontScale(scale) {
+  document.documentElement.style.setProperty('--ui-scale', scale);
+}
+
+// Timeline toolbar wiring
+$('#tlSearch') && $('#tlSearch').addEventListener('input', (e) => { tlQuery = e.target.value.trim().toLowerCase(); renderTimeline(); });
+$('#tlGroup') && $('#tlGroup').addEventListener('change', (e) => { tlGroup = e.target.checked; renderTimeline(); });
+$('#tlFontPlus') && $('#tlFontPlus').addEventListener('click', async () => {
+  const cfg = await jarvis.config.get();
+  const next = Math.min(1.4, (cfg.uiFontScale || 1) + 0.1);
+  await jarvis.config.patch({ uiFontScale: next });
+  applyFontScale(next);
+});
+$('#tlFontMinus') && $('#tlFontMinus').addEventListener('click', async () => {
+  const cfg = await jarvis.config.get();
+  const next = Math.max(0.9, (cfg.uiFontScale || 1) - 0.1);
+  await jarvis.config.patch({ uiFontScale: next });
+  applyFontScale(next);
+});
+$('#tlSummary') && $('#tlSummary').addEventListener('click', async () => {
+  const box = $('#tlSummaryBox');
+  box.classList.remove('hidden');
+  box.textContent = 'Summarizing today…';
+  try {
+    const r = await jarvis.summary.today();
+    box.textContent = r.text;
+  } catch (e) {
+    box.textContent = 'Could not summarize: ' + e.message;
+  }
+});
+
+// ---------- Intelligence actions ----------
+$('#intelConnect') && $('#intelConnect').addEventListener('click', async () => {
+  const entity = (prompt('Link everything about… (e.g. a vessel, ticket, person)') || '').trim();
+  if (!entity) return;
+  goToView('chat');
+  addBubble('user', `Link context: ${entity}`);
+  const { msg, bubble } = addBubble('assistant', 'Connecting the dots…');
+  bubble.classList.add('thinking');
+  try {
+    const res = await jarvis.intel.connections(entity);
+    bubble.classList.remove('thinking');
+    bubble.textContent = res.text;
+    renderSources(msg, res.sources);
+  } catch (e) {
+    bubble.classList.remove('thinking');
+    bubble.textContent = 'Could not link context: ' + e.message;
+  }
+});
+$('#intelDraft') && $('#intelDraft').addEventListener('click', async () => {
+  const goal = (prompt('What should the message say / achieve?') || '').trim();
+  if (!goal) return;
+  goToView('chat');
+  addBubble('user', `Draft: ${goal}`);
+  const { bubble } = addBubble('assistant', 'Drafting in your style…');
+  bubble.classList.add('thinking');
+  try {
+    const res = await jarvis.intel.draft({ goal, channel: 'message' });
+    bubble.classList.remove('thinking');
+    bubble.textContent = res.text;
+  } catch (e) {
+    bubble.classList.remove('thinking');
+    bubble.textContent = 'Could not draft: ' + e.message;
+  }
+});
+$('#playbookBtn') && $('#playbookBtn').addEventListener('click', async () => {
+  const btn = $('#playbookBtn');
+  btn.disabled = true; btn.textContent = 'Building…';
+  try {
+    const r = await jarvis.intel.playbook();
+    if (r.ok) { toast('Playbook saved to Memory.'); }
+    else toast(r.reason === 'not-enough' ? 'Need more recent activity first.' : 'Failed: ' + r.reason);
+  } catch (e) { toast('Failed: ' + e.message); }
+  finally { btn.disabled = false; btn.textContent = '🧭 Build playbook from recent activity'; }
+});
 
 // ---------- Quick-open: triple-Ctrl while focused ----------
 let ctrlTaps = [];
@@ -375,6 +520,11 @@ function rowText(key, title, desc, cfg, type = 'text') {
 function rowList(key, title, desc, cfg) {
   return rowText(key, title, desc + ' (comma-separated)', { [key]: (cfg[key] || []).join(', ') });
 }
+function rowArea(key, title, desc, cfg) {
+  const val = cfg[key] == null ? '' : cfg[key];
+  return `<div class="row col"><div class="label"><div class="t">${title}</div><div class="d">${desc}</div></div>
+    <textarea data-key="${key}" rows="3" class="setting-area">${escapeHtml(String(val))}</textarea></div>`;
+}
 
 async function loadSettings() {
   const cfg = await jarvis.config.get();
@@ -399,6 +549,14 @@ async function loadSettings() {
       ${rowToggle('screenshotLearning', 'Screenshot learning', 'Capture only on meaningful screen changes, store structured text', cfg)}
       ${rowToggle('clipboardHistory', 'Clipboard history', 'Remember copied text', cfg)}
       ${rowToggle('browserHistory', 'Browser history', 'Remember pages sent by the extension', cfg)}
+      <div class="row"><div class="label"><div class="t">Pause when idle (seconds)</div><div class="d">Stop capturing if no keyboard/mouse for this long. 0 = always on</div></div>
+        <input type="range" min="0" max="300" step="15" data-key="captureIdlePauseSec" value="${cfg.captureIdlePauseSec ?? 60}"/></div>
+      <div class="row"><div class="label"><div class="t">Same-screen re-check (seconds)</div><div class="d">Higher = lighter. Only re-captures the same window this often</div></div>
+        <input type="range" min="15" max="300" step="15" data-key="captureSameWindowSec" value="${Math.round((cfg.captureSameWindowMs||90000)/1000)}"/></div>
+      <div class="row"><div class="label"><div class="t">Change sensitivity</div><div class="d">Lower = captures more often; higher = only big changes</div></div>
+        <input type="range" min="0.04" max="0.30" step="0.02" data-key="screenshotChangeThreshold" value="${cfg.screenshotChangeThreshold}"/></div>
+      <div class="row"><div class="label"><div class="t">Min interval (seconds)</div><div class="d">Never sample faster than this</div></div>
+        <input type="range" min="2" max="20" step="1" data-key="screenshotMinIntervalSec" value="${Math.round((cfg.screenshotMinIntervalMs||4000)/1000)}"/></div>
     </div>
 
     <div class="group">
@@ -440,6 +598,21 @@ async function loadSettings() {
     <div class="group">
       <h3>Errors &amp; alerts</h3>
       ${rowToggle('errorAlerts', 'Detect on-screen errors', 'Alert when an error appears and suggest a past fix', cfg)}
+      ${rowText('errorRepeatThreshold', 'Recurring after (times)', 'Flag an error as recurring after this many occurrences in the window', cfg, 'number')}
+      ${rowText('errorRepeatWindowDays', 'Window (days)', 'Count recurrences within this many days', cfg, 'number')}
+    </div>
+
+    <div class="group">
+      <h3>OPUS specialist &amp; voice</h3>
+      ${rowToggle('opusMode', 'OPUS / port mode', 'Use terminal terminology (BAPLIE, stowage, vessel…) when answering', cfg)}
+      <div class="row"><div class="label"><div class="t">Answer language</div><div class="d">Language the in-app assistant replies in</div></div>
+        <select data-key="answerLanguage">
+          <option value="en"${cfg.answerLanguage === 'en' ? ' selected' : ''}>English</option>
+          <option value="vi"${cfg.answerLanguage === 'vi' ? ' selected' : ''}>Vietnamese</option>
+          <option value="auto"${cfg.answerLanguage === 'auto' ? ' selected' : ''}>Match my question</option>
+        </select></div>
+      ${rowArea('opusGlossary', 'OPUS glossary', 'Domain terms fed to the assistant — edit to fit your terminal', cfg)}
+      ${rowArea('writingSamples', 'My writing samples', 'Paste a few of your typical messages so drafts match your style', cfg)}
     </div>
 
     <div class="group">
@@ -459,16 +632,25 @@ async function loadSettings() {
   $$('#settingsBody input[type="checkbox"]').forEach((el) =>
     el.addEventListener('change', () => jarvis.config.patch({ [el.dataset.key]: el.checked }).then(refreshLlmStatus))
   );
-  $$('#settingsBody input[type="text"], #settingsBody input[type="password"], #settingsBody input[type="number"], #settingsBody select').forEach((el) => {
+  $$('#settingsBody input[type="text"], #settingsBody input[type="password"], #settingsBody input[type="number"], #settingsBody input[type="range"], #settingsBody textarea, #settingsBody select').forEach((el) => {
     if (el.readOnly) return;
     el.addEventListener('change', () => {
+      let key = el.dataset.key;
       let val = el.value;
-      if (['excludedApps', 'excludedFolders', 'excludedDomains'].includes(el.dataset.key)) {
+      if (['excludedApps', 'excludedFolders', 'excludedDomains'].includes(key)) {
         val = el.value.split(',').map((s) => s.trim()).filter(Boolean);
+      } else if (key === 'screenshotMinIntervalSec') {
+        key = 'screenshotMinIntervalMs';
+        val = Math.max(2000, (parseInt(el.value, 10) || 4) * 1000);
+      } else if (key === 'captureSameWindowSec') {
+        key = 'captureSameWindowMs';
+        val = Math.max(15000, (parseInt(el.value, 10) || 90) * 1000);
+      } else if (el.type === 'range') {
+        val = parseFloat(el.value);
       } else if (el.type === 'number') {
         val = Math.max(0, parseInt(el.value, 10) || 0);
       }
-      jarvis.config.patch({ [el.dataset.key]: val }).then(refreshLlmStatus);
+      jarvis.config.patch({ [key]: val }).then(refreshLlmStatus);
     });
   });
   $('#cleanNowBtn').addEventListener('click', async () => {
@@ -551,11 +733,15 @@ jarvis.onEvent((p) => {
   }
   if (p.type === 'error-detected') {
     const errs = (p.errors || []).join('; ');
-    const sug = p.suggestion ? `<br><span class="alert-sug">Suggestion: ${escapeHtml(String(p.suggestion).slice(0, 160))}</span>` : '';
-    showAlert(`<b>Error detected${p.app ? ' in ' + escapeHtml(p.app) : ''}:</b> ${escapeHtml(errs.slice(0, 160))}${sug}`, true);
+    const sug = p.suggestion ? `<br><span class="alert-sug">Last fix: ${escapeHtml(String(p.suggestion).slice(0, 160))}</span>` : '';
+    const head = p.recurring
+      ? `<b>⚠ Recurring error (${p.recurCount}× this week)${p.app ? ' in ' + escapeHtml(p.app) : ''}:</b>`
+      : `<b>Error detected${p.app ? ' in ' + escapeHtml(p.app) : ''}:</b>`;
+    showAlert(`${head} ${escapeHtml(errs.slice(0, 160))}${sug}`, true);
   }
 });
 
 loadTagBar();
+jarvis.config.get().then((cfg) => applyFontScale(cfg.uiFontScale || 1));
 refreshLlmStatus();
 setInterval(refreshLlmStatus, 30000);

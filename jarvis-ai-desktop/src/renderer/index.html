@@ -12,8 +12,13 @@
       <!-- Sidebar -->
       <nav class="rail" aria-label="Primary">
         <div class="brand">
-          <span class="brand-mark">◆</span>
-          <span class="brand-name">JARVIS</span>
+          <div class="reactor" aria-hidden="true">
+            <span class="ring r1"></span><span class="ring r2"></span><span class="ring r3"></span><span class="core"></span>
+          </div>
+          <div class="brand-text">
+            <span class="brand-name">JARVIS</span>
+            <span class="brand-sub">ZEPHYR.N</span>
+          </div>
         </div>
         <button class="nav active" data-view="chat"><span class="nav-ic">❯</span>Ask</button>
         <button class="nav" data-view="memory"><span class="nav-ic">▤</span>Memory</button>
@@ -28,6 +33,12 @@
 
       <!-- Main -->
       <main class="stage">
+        <span class="hud-corner hc1" aria-hidden="true"></span>
+        <span class="hud-corner hc2" aria-hidden="true"></span>
+        <span class="hud-corner hc3" aria-hidden="true"></span>
+        <span class="hud-corner hc4" aria-hidden="true"></span>
+        <span class="hud-scan" aria-hidden="true"></span>
+        <span class="hud-watermark" aria-hidden="true"></span>
         <div class="alertbar hidden" id="alertBar"></div>
         <!-- CHAT -->
         <section class="view" data-view="chat">
@@ -36,6 +47,10 @@
             <p class="sub">Every answer is searched against your own work first, then grounded by the model.</p>
           </header>
           <div class="tagbar" id="tagBar"></div>
+          <div class="intelbar">
+            <button id="intelConnect" class="ghost mini">🔗 Link context</button>
+            <button id="intelDraft" class="ghost mini">✍ Draft in my style</button>
+          </div>
           <div class="chat-scroll" id="chatScroll">
             <div class="empty" id="chatEmpty">
               <p class="empty-title">Nothing asked yet.</p>
@@ -77,6 +92,16 @@
             <h1>Timeline</h1>
             <p class="sub">What you've worked on, newest first. Detected errors are flagged.</p>
           </header>
+          <div class="tl-toolbar">
+            <input type="text" id="tlSearch" class="tl-search" placeholder="Search timeline…" />
+            <label class="tl-check"><input type="checkbox" id="tlGroup" /> Group by session</label>
+            <span class="tl-fontctl">Text
+              <button id="tlFontMinus" class="ghost mini">A−</button>
+              <button id="tlFontPlus" class="ghost mini">A+</button>
+            </span>
+            <button id="tlSummary" class="primary mini">Summarize today</button>
+          </div>
+          <div class="tl-summarybox hidden" id="tlSummaryBox"></div>
           <div class="timeline" id="timelineList"></div>
         </section>
 
@@ -99,6 +124,9 @@
             </div>
           </div>
           <div id="autoDetected" class="detected"></div>
+          <div class="gen-row" style="margin-top:6px">
+            <button id="playbookBtn" class="ghost">🧭 Build playbook from recent activity</button>
+          </div>
           <pre class="script hidden" id="autoOut"><code></code></pre>
           <div class="script-actions hidden" id="autoActions">
             <button id="autoSave" class="primary">Save script…</button>

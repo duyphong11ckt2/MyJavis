@@ -154,6 +154,20 @@ Rules:
   knowledge, clearly noting it was not found in their memory.
 - Be concise and concrete. Cite which sources you used by their [n] markers.`;
 
+/** Build the system prompt with optional OPUS domain framing + answer language. */
+function buildSystemPrompt() {
+  let sys = SYSTEM_PROMPT;
+  if (config.read('opusMode')) {
+    sys +=
+      `\n\nDOMAIN: The user works in container terminal / port operations on OPUS Terminal. ` +
+      `Use this terminology when relevant:\n${config.read('opusGlossary') || ''}`;
+  }
+  const lang = config.read('answerLanguage') || 'en';
+  if (lang === 'en') sys += `\n\nAlways answer in English.`;
+  else if (lang === 'vi') sys += `\n\nAlways answer in Vietnamese.`;
+  return sys;
+}
+
 /** Full RAG answer. Memory is ALWAYS searched before the LLM is called. */
 async function answer(question, opts = {}) {
   const hits = await retrieve(question, opts);
@@ -173,7 +187,7 @@ async function answer(question, opts = {}) {
 
   let text;
   try {
-    ({ text } = await llm.chat({ system: SYSTEM_PROMPT, messages }));
+    ({ text } = await llm.chat({ system: buildSystemPrompt(), messages }));
   } catch (e) {
     // Graceful degradation: still return the retrieved memory so the feature
     // is useful even with no LLM provider reachable.
@@ -196,6 +210,70 @@ async function answer(question, opts = {}) {
   };
 }
 
+/** (#3) Context linking: gather everything about an entity and weave the story. */
+async function connections(entity, opts = {}) {
+  const hits = await retrieve(entity, { topK: 14, minScore: 0.18, ...opts });
+  if (!hits.length) {
+    return { text: `I have nothing in memory about "${entity}" yet.`, sources: [] };
+  }
+  const context = hits
+    .map((h, i) => `[${i + 1}] (${h.kind}${h.source ? ' · ' + h.source : ''}) ${h.content}`)
+    .join('\n\n');
+  const sys =
+    buildSystemPrompt() +
+    `\n\nTASK: The user wants to understand everything connected to one subject. ` +
+    `From the CONTEXT, build a single coherent picture: what it is, the related ` +
+    `tickets/emails/files/apps, the timeline, open items, and how they link together. ` +
+    `Group by theme, cite [n] markers, and be concrete.`;
+  let text;
+  try {
+    ({ text } = await llm.chat({
+      system: sys,
+      messages: [{ role: 'user', content: `CONTEXT:\n${context}\n\nSUBJECT: ${entity}` }]
+    }));
+  } catch (e) {
+    text = `Could not reach the model. Related items found:\n\n` +
+      hits.map((h, i) => `[${i + 1}] ${h.title || h.source || h.kind}`).join('\n');
+  }
+  return {
+    text,
+    sources: hits.map((h, i) => ({ n: i + 1, id: h.id, kind: h.kind, source: h.source, title: h.title }))
+  };
+}
+
+/** (#4) Draft a reply in the user's own writing style. */
+async function draftReply({ goal, channel = 'message' } = {}) {
+  const samples = (config.read('writingSamples') || '').trim();
+  // Pull a few of the user's own past typed messages as extra style hints.
+  let past = [];
+  try {
+    past = db
+      .get()
+      .prepare(`SELECT content FROM messages WHERE role='user' ORDER BY id DESC LIMIT 8`)
+      .all()
+      .map((r) => r.content);
+  } catch (_) {}
+  const styleBlock = [samples, past.join('\n')].filter(Boolean).join('\n');
+  const sys =
+    `You draft messages in the USER'S OWN writing style. Study the style samples and ` +
+    `mirror their tone, length, formality, and habits. Output only the draft, no preamble. ` +
+    (config.read('answerLanguage') === 'vi' ? `Write in Vietnamese.` : `Match the language of the goal.`);
+  const messages = [
+    {
+      role: 'user',
+      content:
+        `STYLE SAMPLES:\n${styleBlock || '(no samples yet — use a clear, professional tone)'}\n\n` +
+        `CHANNEL: ${channel}\nGOAL: ${goal}\n\nWrite the ${channel}.`
+    }
+  ];
+  try {
+    const { text } = await llm.chat({ system: sys, messages });
+    return { text };
+  } catch (e) {
+    return { text: 'Could not reach the model to draft: ' + e.message };
+  }
+}
+
 function recent(kind, limit = 50) {
   const d = db.get();
   const q = kind
@@ -204,4 +282,4 @@ function recent(kind, limit = 50) {
   return kind ? q.all(kind, limit) : q.all(limit);
 }
 
-module.exports = { ingest, retrieve, answer, chunk, recent };
+module.exports = { ingest, retrieve, answer, connections, draftReply, chunk, recent };

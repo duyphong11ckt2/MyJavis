@@ -26,8 +26,14 @@ const DEFAULTS = {
   screenshotLearning: false,
   screenshotChangeThreshold: 0.12, // 0..1 perceptual-diff ratio to count as "meaningful"
   screenshotMinIntervalMs: 4000, // never sample faster than this even on change
+  screenshotDedupeMs: 120000, // skip identical app+task captures within this window
+  captureIdlePauseSec: 60, // pause capture when no keyboard/mouse for this long (#2)
+  captureSameWindowMs: 90000, // on the same window, re-check at most this often (#3)
   clipboardHistory: false,
   browserHistory: false,
+
+  // --- UI ------------------------------------------------------------------
+  uiFontScale: 1, // 0.9..1.4 — scales Timeline / reading text
 
   // --- Background behaviour ------------------------------------------------
   autoStart: false,
@@ -62,6 +68,22 @@ const DEFAULTS = {
   // --- Error detection (#7) ------------------------------------------------
   // When screen text contains errors, raise a desktop alert and tag the memory.
   errorAlerts: true,
+  errorRepeatThreshold: 3, // alert "recurring" when same error seen this many times
+  errorRepeatWindowDays: 7, // ...within this many days
+
+  // --- OPUS specialist + answer language -----------------------------------
+  opusMode: true, // inject port/terminal terminology and domain framing
+  answerLanguage: 'en', // 'en' | 'vi' | 'auto' — language the in-app assistant replies in
+  opusGlossary:
+    'OPUS Terminal is a container terminal operating system. Key terms: ' +
+    'BAPLIE (bay plan / stowage EDI message listing container positions on a vessel); ' +
+    'stowage (how containers are arranged on a vessel by bay/row/tier); ' +
+    'vessel (ship), voyage, berth, yard, gantry/quay crane; ' +
+    'hsheet (hatch/stowage editing grid); EDI, COPRAR, CODECO, MOVINS messages; ' +
+    'discharge/load, reefer, IMDG (dangerous goods), T/O (truck-out), gate, CY (container yard).',
+
+  // --- Writing style (draft in my voice) -----------------------------------
+  writingSamples: '', // user-provided samples of their own writing, used when drafting
 
   // --- Quick-open hotkey ---------------------------------------------------
   // Global accelerator (works anywhere). Triple-Ctrl works while focused.

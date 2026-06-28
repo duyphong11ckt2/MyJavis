@@ -20,6 +20,7 @@
 const config = require('./config');
 const privacy = require('./privacy');
 const memory = require('./memory');
+const db = require('./db');
 const ocr = require('./ocr');
 const llm = require('./llm');
 const activeWindow = require('./activeWindow');
@@ -27,6 +28,9 @@ const { log } = require('./logger');
 
 let timer = null;
 let lastHash = null;
+let lastStored = null; // { appKey, taskKey, ts } for dedupe
+let lastWindowKey = null; // app|title of last checked window (#3)
+let lastCaptureTs = 0; // when we last took a real screenshot (#2/#3)
 let busy = false;
 let onEvent = () => {};
 
@@ -41,7 +45,7 @@ async function captureScreen() {
   const scale = primary.scaleFactor || 1;
 
   // Cap the captured resolution so OCR stays fast but legible.
-  const maxW = 1920;
+  const maxW = 2560;
   const fullW = Math.round(width * scale);
   const fullH = Math.round(height * scale);
   const thumbW = Math.min(fullW, maxW);
@@ -88,7 +92,46 @@ function hammingRatio(a, b) {
 const EXTRACT_PROMPT = `Extract a compact structured record from this on-screen text.
 Return STRICT JSON only, no prose, with keys:
 {"application":"","current_task":"","errors":[],"buttons":[],"commands":[],"workflow_step":""}
-Keep each value short. Use [] when nothing applies.`;
+Rules:
+- "errors" must ONLY contain genuine SOFTWARE error messages the application is showing
+  right now (e.g. exceptions, failed operations, error dialogs, stack traces, HTTP 4xx/5xx,
+  "cannot", "failed", "denied", "timeout", "not found"). 
+- Do NOT treat normal business content as errors. Words like "incident", "ticket", "issue",
+  "deleted", "review", "bug" appearing inside a document, ticket title, chat, or email are
+  NOT errors — leave "errors" empty in that case.
+- Keep each value short. Use [] when nothing applies.`;
+
+// Strong signals that a string is a real application error, not business text.
+const ERROR_SIGNAL = /(exception|stack ?trace|traceback|failed|failure|cannot|could not|denied|unauthorized|forbidden|timeout|timed out|null reference|undefined is not|is not a function|segmentation fault|fatal error|\bcrash|\bpanic\b|ora-\d+|sqlstate|err_[a-z]+|errno|http\s?[45]\d\d|status\s?[45]\d\d)/i;
+// Phrases that look error-ish but are usually business content — require a real signal too.
+const SOFT_WORDS = /\b(incident|ticket|issue|deleted|review|reopen|closure|bug)\b/i;
+
+/** Keep only entries that read like genuine software errors. */
+function filterRealErrors(errors, fullText) {
+  const list = (errors || []).map((e) => String(e).trim()).filter(Boolean);
+  const kept = list.filter((e) => {
+    if (ERROR_SIGNAL.test(e)) return true;
+    // If it only contains soft business words and no hard signal, drop it.
+    if (SOFT_WORDS.test(e)) return false;
+    return false;
+  });
+  // Extra guard: even if the model returned an error, require a hard signal
+  // somewhere on screen, otherwise treat as no-error.
+  if (kept.length && !ERROR_SIGNAL.test(fullText || '')) return [];
+  return kept;
+}
+
+/** Stable signature for an error so recurrences can be counted (#1). */
+function errorSignature(errors) {
+  return (errors || [])
+    .join(' ')
+    .toLowerCase()
+    .replace(/[0-9]+/g, '#') // ignore specific IDs/numbers
+    .replace(/[^a-z#\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 80);
+}
 
 async function extractStructured(text) {
   if (!text || text.length < 12) return null;
@@ -110,7 +153,7 @@ async function extractStructured(text) {
  * Surface a detected on-screen error: look for a past fix in memory/corrections,
  * show a desktop notification, and emit an event for the UI.
  */
-async function raiseErrorAlert(errors, structured) {
+async function raiseErrorAlert(errors, structured, errorSig) {
   const summary = errors.join('; ').slice(0, 200);
   let suggestion = '';
   try {
@@ -119,13 +162,26 @@ async function raiseErrorAlert(errors, structured) {
     if (best) suggestion = String(best.content).slice(0, 240);
   } catch (_) {}
 
+  // (#1) How many times has this same error appeared recently?
+  let recurCount = 1;
+  try {
+    const windowDays = config.read('errorRepeatWindowDays') || 7;
+    const since = Date.now() - windowDays * 24 * 60 * 60 * 1000;
+    recurCount = db.countErrorsBySig(errorSig, since) || 1;
+  } catch (_) {}
+  const threshold = config.read('errorRepeatThreshold') || 3;
+  const recurring = recurCount >= threshold;
+
   try {
     if (config.read('notifications')) {
       const { Notification } = require('electron');
+      const title = recurring
+        ? `JARVIS: recurring error (${recurCount}× this week)`
+        : 'JARVIS: error detected on screen';
       const body = suggestion
-        ? `${summary}\n\nSeen before — suggestion: ${suggestion}`
+        ? `${summary}\n\nSeen before — last fix: ${suggestion}`
         : summary;
-      new Notification({ title: 'JARVIS: error detected on screen', body }).show();
+      new Notification({ title, body }).show();
     }
   } catch (_) {}
 
@@ -134,34 +190,58 @@ async function raiseErrorAlert(errors, structured) {
     app: structured?.application || null,
     task: structured?.current_task || null,
     errors,
-    suggestion
+    suggestion,
+    recurring,
+    recurCount
   });
-  log.info('Error alert raised: ' + summary);
+  log.info(`Error alert raised (${recurCount}×${recurring ? ', recurring' : ''}): ${summary}`);
 }
 
 async function processFrame() {
   if (busy) return;
   busy = true;
   try {
-    const buf = await captureScreen();
-    const hash = await perceptualHash(buf);
-    const changed = hammingRatio(lastHash, hash);
-    const threshold = config.read('screenshotChangeThreshold') ?? 0.12;
+    // (#2) Pause when the user is away. powerMonitor.getSystemIdleTime() is
+    // built into Electron (no native module) and returns seconds since the last
+    // keyboard/mouse input. If idle beyond the threshold, do nothing this tick.
+    let idleSec = 0;
+    try { idleSec = require('electron').powerMonitor.getSystemIdleTime(); } catch (_) {}
+    const idlePause = config.read('captureIdlePauseSec') ?? 60;
+    if (idlePause > 0 && idleSec >= idlePause) { busy = false; return; }
 
-    if (lastHash && changed < threshold) {
-      busy = false;
-      return; // not a meaningful change
-    }
-    lastHash = hash;
-
-    // Active-app gating (#1): skip excluded apps / sensitive window titles.
+    // (#3) Cheap active-window check BEFORE taking any screenshot.
     const win = await activeWindow.current(); // { app, title } on Windows; {} elsewhere
     const ctx = { app: win.app, title: win.title };
     if (!privacy.allow(ctx)) {
       log.info(`Skipped capture (excluded): ${win.app || ''} ${win.title || ''}`.trim());
+      lastWindowKey = `${(win.app || '').toLowerCase()}|${(win.title || '').toLowerCase()}`;
       busy = false;
       return;
     }
+
+    const winKey = `${(win.app || '').toLowerCase()}|${(win.title || '').toLowerCase()}`;
+    const windowChanged = winKey !== lastWindowKey;
+    const sameWindowMs = config.read('captureSameWindowMs') ?? 90000;
+    const sinceCapture = Date.now() - (lastCaptureTs || 0);
+
+    // Only spend a screenshot when the window changed, or enough time has passed
+    // to re-check the same window. Otherwise skip cheaply (no screen grab).
+    if (!windowChanged && sinceCapture < sameWindowMs) {
+      busy = false;
+      return;
+    }
+    lastWindowKey = winKey;
+
+    const buf = await captureScreen();
+    const hash = await perceptualHash(buf);
+    const changed = hammingRatio(lastHash, hash);
+    const threshold = config.read('screenshotChangeThreshold') ?? 0.12;
+    // Same window: require a real visual change. New window: always proceed.
+    if (!windowChanged && lastHash && changed < threshold) {
+      busy = false;
+      return;
+    }
+    lastHash = hash;
 
     const text = await ocr.recognize(buf);
     if (!text) {
@@ -171,13 +251,32 @@ async function processFrame() {
 
     const structured = await extractStructured(text);
     const activeTag = config.read('activeTag') || null; // project label (#6)
-    const errors = (structured && structured.errors) || [];
-    const hasError = Array.isArray(errors) && errors.filter(Boolean).length > 0;
+    const realErrors = filterRealErrors(structured && structured.errors, text); // (A) real errors only
+    const hasError = realErrors.length > 0;
+    const errorSig = hasError ? errorSignature(realErrors) : null;
+
+    // (B) Deduplicate: skip if this is the same app+task as the last stored frame
+    // within a short window (avoids many near-identical rows for one screen).
+    const appKey = (structured?.application || win.app || 'screen').toLowerCase().trim();
+    const taskKey = (structured?.current_task || win.title || '').toLowerCase().trim().slice(0, 80);
+    const dedupeMs = config.read('screenshotDedupeMs') ?? 120000;
+    const nowTs = Date.now();
+    if (
+      !hasError &&
+      lastStored &&
+      lastStored.appKey === appKey &&
+      lastStored.taskKey === taskKey &&
+      nowTs - lastStored.ts < dedupeMs
+    ) {
+      log.info(`Skipped duplicate capture: ${appKey} · ${taskKey}`);
+      busy = false;
+      return;
+    }
 
     const content = structured
       ? `Application: ${structured.application}\n` +
         `Task: ${structured.current_task}\n` +
-        `Errors: ${(structured.errors || []).join('; ')}\n` +
+        `Errors: ${realErrors.join('; ')}\n` +
         `Buttons: ${(structured.buttons || []).join('; ')}\n` +
         `Commands: ${(structured.commands || []).join('; ')}\n` +
         `Workflow step: ${structured.workflow_step}`
@@ -195,13 +294,16 @@ async function processFrame() {
         changeRatio: Number(changed.toFixed(3)),
         app: win.app || null,
         isError: hasError,
-        errors: hasError ? errors.filter(Boolean) : []
+        errors: hasError ? realErrors : [],
+        errorSig: errorSig
       }
     });
+    lastStored = { appKey, taskKey, ts: nowTs };
+    lastCaptureTs = nowTs;
 
-    // Error detection (#7): alert + suggest a fix from past memory/corrections.
+    // Error detection (#7) + recurring-error escalation (#1).
     if (hasError && config.read('errorAlerts')) {
-      await raiseErrorAlert(errors.filter(Boolean), structured);
+      await raiseErrorAlert(realErrors, structured, errorSig);
     }
 
     onEvent({ type: 'screenshot-learned', app: structured?.application, task: structured?.current_task });
@@ -225,6 +327,9 @@ function stop() {
   if (timer) clearInterval(timer);
   timer = null;
   lastHash = null;
+  lastStored = null;
+  lastWindowKey = null;
+  lastCaptureTs = 0;
   log.info('Screenshot learning stopped.');
 }
 
