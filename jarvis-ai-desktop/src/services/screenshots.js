@@ -2,6 +2,9 @@
 /**
  * Screenshot learning.
  *
+ * Capture method: Electron's built-in desktopCapturer (no external binaries,
+ * no .bat helper). Works on Windows/macOS/Linux from the main process.
+ *
  * Strategy (privacy-respecting and storage-light):
  *  1. Poll the screen at a modest interval, but only PROCESS a frame when it is
  *     "meaningfully different" from the previous one — measured by a downscaled
@@ -25,6 +28,41 @@ let timer = null;
 let lastHash = null;
 let busy = false;
 let onEvent = () => {};
+
+/**
+ * Capture the primary display as a PNG buffer using Electron's desktopCapturer.
+ * Requires the Electron app to be ready; only used from the main process.
+ */
+async function captureScreen() {
+  const { desktopCapturer, screen } = require('electron');
+  const primary = screen.getPrimaryDisplay();
+  const { width, height } = primary.size;
+  const scale = primary.scaleFactor || 1;
+
+  // Cap the captured resolution so OCR stays fast but legible.
+  const maxW = 1920;
+  const fullW = Math.round(width * scale);
+  const fullH = Math.round(height * scale);
+  const thumbW = Math.min(fullW, maxW);
+  const thumbH = Math.round((thumbW / fullW) * fullH);
+
+  const sources = await desktopCapturer.getSources({
+    types: ['screen'],
+    thumbnailSize: { width: thumbW, height: thumbH }
+  });
+  if (!sources || !sources.length) throw new Error('no screen source available');
+
+  // Prefer the primary screen if its display_id matches; otherwise take first.
+  let src = sources[0];
+  const primaryId = String(primary.id);
+  for (const s of sources) {
+    if (String(s.display_id) === primaryId) { src = s; break; }
+  }
+
+  const png = src.thumbnail.toPNG();
+  if (!png || !png.length) throw new Error('empty screen capture');
+  return png;
+}
 
 /** 16x16 grayscale average hash from a screenshot buffer (via sharp). */
 async function perceptualHash(buf) {
@@ -71,8 +109,7 @@ async function processFrame() {
   if (busy) return;
   busy = true;
   try {
-    const screenshot = require('screenshot-desktop');
-    const buf = await screenshot({ format: 'png' });
+    const buf = await captureScreen();
     const hash = await perceptualHash(buf);
     const changed = hammingRatio(lastHash, hash);
     const threshold = config.read('screenshotChangeThreshold') ?? 0.12;
