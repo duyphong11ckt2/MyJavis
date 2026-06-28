@@ -62,8 +62,24 @@ function show() {
   w.focus();
 }
 
+/** Show & focus if hidden/blurred; hide if currently focused. */
+function toggle() {
+  if (win && !win.isDestroyed() && win.isVisible() && win.isFocused()) {
+    if (config.read('closeToTray')) win.hide();
+    else win.minimize();
+    return;
+  }
+  const w = create();
+  w.show();
+  w.focus();
+  // Ask the renderer to jump straight to the Ask box.
+  try {
+    w.webContents.send('jarvis:event', { type: 'quick-open' });
+  } catch (_) {}
+}
+
 function setForceQuit(v) {
   forceQuit = v;
 }
 
-module.exports = { create, get, show, setForceQuit };
+module.exports = { create, get, show, toggle, setForceQuit };

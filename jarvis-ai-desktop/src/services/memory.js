@@ -38,13 +38,13 @@ function chunk(text, size = 1100, overlap = 150) {
 }
 
 /** Store a piece of knowledge. Returns the list of created memory ids. */
-async function ingest({ kind, source = null, title = null, content, metadata = {}, pinned = 0 }) {
+async function ingest({ kind, source = null, title = null, content, metadata = {}, pinned = 0, tag = null }) {
   const d = db.get();
   const pieces = chunk(content);
   const ids = [];
   const insert = d.prepare(
-    `INSERT INTO memories(kind, source, title, content, metadata, embedding, dim, created_at, pinned)
-     VALUES (@kind,@source,@title,@content,@metadata,@embedding,@dim,@created_at,@pinned)`
+    `INSERT INTO memories(kind, source, title, content, metadata, embedding, dim, created_at, pinned, tag)
+     VALUES (@kind,@source,@title,@content,@metadata,@embedding,@dim,@created_at,@pinned,@tag)`
   );
   for (const piece of pieces) {
     let embedding = null;
@@ -65,11 +65,12 @@ async function ingest({ kind, source = null, title = null, content, metadata = {
       embedding,
       dim,
       created_at: now(),
-      pinned
+      pinned,
+      tag: tag || null
     });
     ids.push(info.lastInsertRowid);
   }
-  log.info(`Ingested ${ids.length} chunk(s) of kind=${kind} source=${source || '-'}`);
+  log.info(`Ingested ${ids.length} chunk(s) of kind=${kind} source=${source || '-'}${tag ? ' tag=' + tag : ''}`);
   return ids;
 }
 
@@ -101,6 +102,7 @@ async function retrieve(query, opts = {}) {
   const d = db.get();
   const topK = opts.topK || config.read('retrievalTopK') || 6;
   const minScore = opts.minScore ?? config.read('retrievalMinScore') ?? 0.25;
+  const tag = opts.tag || null; // when set, scope to this project (corrections always apply)
 
   let qvec = null;
   try {
@@ -109,17 +111,19 @@ async function retrieve(query, opts = {}) {
     log.warn('Query embedding failed, keyword-only retrieval:', e.message);
   }
 
+  const inScope = (r) => !tag || r.tag === tag || r.kind === 'correction';
   const merged = new Map();
 
   // 1) Vector search over all rows that have an embedding.
   if (qvec) {
     const rows = d
       .prepare(
-        `SELECT id, kind, source, title, content, metadata, embedding, created_at, pinned
+        `SELECT id, kind, source, title, content, metadata, embedding, created_at, pinned, tag
          FROM memories WHERE embedding IS NOT NULL`
       )
       .all();
     for (const r of rows) {
+      if (!inScope(r)) continue;
       const score = emb.cosine(qvec, emb.fromBlob(r.embedding));
       const boost = r.kind === 'correction' ? 0.15 : r.pinned ? 0.08 : 0;
       merged.set(r.id, { ...r, score: Math.min(1, score + boost), via: 'vector' });
@@ -128,6 +132,7 @@ async function retrieve(query, opts = {}) {
 
   // 2) Keyword search, folded in (helps exact terms like a copied SQL query).
   for (const r of ftsSearch(query, topK * 3)) {
+    if (!inScope(r)) continue;
     const existing = merged.get(r.id);
     const kwScore = 0.45 + (r.kind === 'correction' ? 0.15 : 0);
     if (existing) existing.score = Math.max(existing.score, kwScore);

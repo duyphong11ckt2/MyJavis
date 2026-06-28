@@ -48,6 +48,26 @@ const DEFAULTS = {
   retrievalTopK: 6,
   retrievalMinScore: 0.25,
 
+  // --- Memory housekeeping (#3) -------------------------------------------
+  // Delete non-pinned, non-correction memories older than this many days.
+  // 0 disables automatic cleanup. Corrections and pinned notes are kept.
+  memoryRetentionDays: 0,
+
+  // --- Project tags (#6) ---------------------------------------------------
+  // User-defined project labels and the one currently in focus. When a tag is
+  // active, new captures are labelled with it and Ask is scoped to it.
+  tags: [],
+  activeTag: '',
+
+  // --- Error detection (#7) ------------------------------------------------
+  // When screen text contains errors, raise a desktop alert and tag the memory.
+  errorAlerts: true,
+
+  // --- Quick-open hotkey ---------------------------------------------------
+  // Global accelerator (works anywhere). Triple-Ctrl works while focused.
+  globalHotkey: 'Control+Shift+Space',
+  tripleCtrlOpen: true,
+
   firstRunComplete: false
 };
 

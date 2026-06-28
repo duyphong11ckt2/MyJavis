@@ -115,12 +115,24 @@ function open(userDataDir) {
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
   db.exec(SCHEMA);
+  // --- Lightweight migrations (safe to run every launch) ---
+  migrate(db);
   db.prepare(
     `INSERT INTO schema_meta(key, value) VALUES('version', '1')
      ON CONFLICT(key) DO NOTHING`
   ).run();
   log.info('Database opened at', file);
   return db;
+}
+
+/** Add columns/indexes introduced after v1 without losing data. */
+function migrate(d) {
+  const cols = d.prepare(`PRAGMA table_info(memories)`).all().map((c) => c.name);
+  if (!cols.includes('tag')) {
+    d.exec(`ALTER TABLE memories ADD COLUMN tag TEXT`);
+    log.info('Migration: added memories.tag column.');
+  }
+  d.exec(`CREATE INDEX IF NOT EXISTS idx_memories_tag ON memories(tag)`);
 }
 
 function get() {
@@ -143,6 +155,39 @@ function wipeAll() {
   log.warn('All stored memories wiped by user request.');
 }
 
+/**
+ * Delete memories older than `days`, keeping anything pinned or of kind
+ * 'correction' (trusted, user-approved knowledge is never auto-removed).
+ * Returns the number of rows deleted. days<=0 is a no-op.
+ */
+function purgeOld(days) {
+  const n = Number(days) || 0;
+  if (n <= 0) return 0;
+  const d = get();
+  const cutoff = Date.now() - n * 24 * 60 * 60 * 1000;
+  const info = d
+    .prepare(
+      `DELETE FROM memories
+       WHERE created_at < ? AND pinned = 0 AND kind <> 'correction'`
+    )
+    .run(cutoff);
+  if (info.changes) log.info(`Housekeeping: removed ${info.changes} memory row(s) older than ${n} day(s).`);
+  return info.changes;
+}
+
+/** Recent activity for the Timeline view (newest first). */
+function timeline(limit = 200) {
+  const d = get();
+  return d
+    .prepare(
+      `SELECT id, kind, source, title, content, tag, metadata, created_at
+       FROM memories
+       WHERE kind IN ('ocr','conversation','document','note','clipboard','browser')
+       ORDER BY created_at DESC LIMIT ?`
+    )
+    .all(limit);
+}
+
 function stats() {
   const d = get();
   const count = (t) => d.prepare(`SELECT COUNT(*) c FROM ${t}`).get().c;
@@ -156,4 +201,4 @@ function stats() {
   };
 }
 
-module.exports = { open, get, wipeAll, stats };
+module.exports = { open, get, wipeAll, stats, purgeOld, timeline };

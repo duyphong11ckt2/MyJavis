@@ -22,6 +22,7 @@ const privacy = require('./privacy');
 const memory = require('./memory');
 const ocr = require('./ocr');
 const llm = require('./llm');
+const activeWindow = require('./activeWindow');
 const { log } = require('./logger');
 
 let timer = null;
@@ -105,6 +106,39 @@ async function extractStructured(text) {
   }
 }
 
+/**
+ * Surface a detected on-screen error: look for a past fix in memory/corrections,
+ * show a desktop notification, and emit an event for the UI.
+ */
+async function raiseErrorAlert(errors, structured) {
+  const summary = errors.join('; ').slice(0, 200);
+  let suggestion = '';
+  try {
+    const hits = await memory.retrieve(summary, { topK: 3 });
+    const best = hits.find((h) => h.kind === 'correction') || hits[0];
+    if (best) suggestion = String(best.content).slice(0, 240);
+  } catch (_) {}
+
+  try {
+    if (config.read('notifications')) {
+      const { Notification } = require('electron');
+      const body = suggestion
+        ? `${summary}\n\nSeen before — suggestion: ${suggestion}`
+        : summary;
+      new Notification({ title: 'JARVIS: error detected on screen', body }).show();
+    }
+  } catch (_) {}
+
+  onEvent({
+    type: 'error-detected',
+    app: structured?.application || null,
+    task: structured?.current_task || null,
+    errors,
+    suggestion
+  });
+  log.info('Error alert raised: ' + summary);
+}
+
 async function processFrame() {
   if (busy) return;
   busy = true;
@@ -120,9 +154,11 @@ async function processFrame() {
     }
     lastHash = hash;
 
-    // Active-app gating hook: platform module may set these. Default allows.
-    const ctx = {}; // { app, url, incognito } when an active-window provider is wired
+    // Active-app gating (#1): skip excluded apps / sensitive window titles.
+    const win = await activeWindow.current(); // { app, title } on Windows; {} elsewhere
+    const ctx = { app: win.app, title: win.title };
     if (!privacy.allow(ctx)) {
+      log.info(`Skipped capture (excluded): ${win.app || ''} ${win.title || ''}`.trim());
       busy = false;
       return;
     }
@@ -134,6 +170,10 @@ async function processFrame() {
     }
 
     const structured = await extractStructured(text);
+    const activeTag = config.read('activeTag') || null; // project label (#6)
+    const errors = (structured && structured.errors) || [];
+    const hasError = Array.isArray(errors) && errors.filter(Boolean).length > 0;
+
     const content = structured
       ? `Application: ${structured.application}\n` +
         `Task: ${structured.current_task}\n` +
@@ -145,14 +185,27 @@ async function processFrame() {
 
     await memory.ingest({
       kind: 'ocr',
-      source: structured?.application || 'screen',
-      title: structured?.current_task || 'Screen capture',
+      source: structured?.application || win.app || 'screen',
+      title: structured?.current_task || win.title || 'Screen capture',
       content,
-      metadata: { structured: !!structured, changeRatio: Number(changed.toFixed(3)) }
+      tag: activeTag,
+      pinned: hasError ? 1 : 0, // keep errors around (skipped by auto-cleanup)
+      metadata: {
+        structured: !!structured,
+        changeRatio: Number(changed.toFixed(3)),
+        app: win.app || null,
+        isError: hasError,
+        errors: hasError ? errors.filter(Boolean) : []
+      }
     });
 
+    // Error detection (#7): alert + suggest a fix from past memory/corrections.
+    if (hasError && config.read('errorAlerts')) {
+      await raiseErrorAlert(errors.filter(Boolean), structured);
+    }
+
     onEvent({ type: 'screenshot-learned', app: structured?.application, task: structured?.current_task });
-    log.info('Learned from screen change. structured=' + !!structured);
+    log.info('Learned from screen change. structured=' + !!structured + (hasError ? ' (error detected)' : ''));
   } catch (e) {
     log.warn('Screenshot frame error:', e.message);
   } finally {

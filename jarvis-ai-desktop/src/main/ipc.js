@@ -34,6 +34,15 @@ function register({ emit }) {
       if (next.screenshotLearning) screenshots.start(emit);
       else screenshots.stop();
     }
+    if ('globalHotkey' in (patch || {})) {
+      try { require('./main').registerHotkey(); } catch (_) {}
+    }
+    if ('memoryRetentionDays' in (patch || {})) {
+      try {
+        const removed = db.purgeOld(next.memoryRetentionDays || 0);
+        if (removed) emit({ type: 'cleanup', removed });
+      } catch (_) {}
+    }
     return next;
   });
 
@@ -49,7 +58,8 @@ function register({ emit }) {
     d.prepare('INSERT INTO messages(conversation_id, role, content, created_at) VALUES (?,?,?,?)')
       .run(convId, 'user', question, Date.now());
 
-    const out = await memory.answer(question);
+    const activeTag = config.read('activeTag') || null;
+    const out = await memory.answer(question, { tag: activeTag });
 
     const msgId = d
       .prepare('INSERT INTO messages(conversation_id, role, content, sources, created_at) VALUES (?,?,?,?,?)')
@@ -61,6 +71,7 @@ function register({ emit }) {
       source: `conversation:${convId}`,
       title: question.slice(0, 80),
       content: `Q: ${question}\nA: ${out.text}`,
+      tag: activeTag,
       metadata: { conversationId: convId }
     });
 
@@ -88,7 +99,8 @@ function register({ emit }) {
 
   // ---- Memory / ingest ----
   ipcMain.handle('memory:note', async (_e, { title, content }) => {
-    const ids = await memory.ingest({ kind: 'note', source: 'user-note', title, content });
+    const tag = config.read('activeTag') || null;
+    const ids = await memory.ingest({ kind: 'note', source: 'user-note', title, content, tag });
     return { ok: true, chunks: ids.length };
   });
   ipcMain.handle('memory:uploadDocs', async () => {
@@ -99,6 +111,7 @@ function register({ emit }) {
       filters: [{ name: 'Text & docs', extensions: ['txt', 'md', 'csv', 'json', 'log', 'sql'] }]
     });
     if (canceled) return { ok: false, count: 0 };
+    const tag = config.read('activeTag') || null;
     let count = 0;
     for (const fp of filePaths) {
       try {
@@ -107,7 +120,8 @@ function register({ emit }) {
           kind: 'document',
           source: fp,
           title: path.basename(fp),
-          content: text
+          content: text,
+          tag
         });
         count++;
       } catch (e) {
@@ -119,6 +133,32 @@ function register({ emit }) {
   });
   ipcMain.handle('memory:recent', (_e, kind) => memory.recent(kind, 60));
   ipcMain.handle('memory:stats', () => db.stats());
+
+  // ---- Timeline (#4) ----
+  ipcMain.handle('timeline:get', (_e, limit) => db.timeline(limit || 200));
+
+  // ---- Detected errors (#7) ----
+  ipcMain.handle('errors:recent', () => {
+    try {
+      return db
+        .get()
+        .prepare(
+          `SELECT id, source, title, content, created_at, metadata
+           FROM memories
+           WHERE kind='ocr' AND json_extract(metadata,'$.isError') = 1
+           ORDER BY created_at DESC LIMIT 40`
+        )
+        .all();
+    } catch (_) {
+      return [];
+    }
+  });
+
+  // ---- Housekeeping (#3) ----
+  ipcMain.handle('memory:cleanupNow', () => {
+    const removed = db.purgeOld(config.read('memoryRetentionDays') || 0);
+    return { ok: true, removed };
+  });
 
   // ---- Automation ----
   ipcMain.handle('automation:detect', () => automation.detectRepetitions());

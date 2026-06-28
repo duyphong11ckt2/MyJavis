@@ -22,8 +22,11 @@ contextBridge.exposeInMainWorld('jarvis', {
     note: (note) => invoke('memory:note', note),
     uploadDocs: () => invoke('memory:uploadDocs'),
     recent: (kind) => invoke('memory:recent', kind),
-    stats: () => invoke('memory:stats')
+    stats: () => invoke('memory:stats'),
+    cleanupNow: () => invoke('memory:cleanupNow')
   },
+  timeline: { get: (limit) => invoke('timeline:get', limit) },
+  errors: { recent: () => invoke('errors:recent') },
   automation: {
     detect: () => invoke('automation:detect'),
     generate: (p) => invoke('automation:generate', p),

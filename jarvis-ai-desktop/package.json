@@ -17,7 +17,7 @@
     "postinstall": "electron-builder install-app-deps",
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
-   "dist:win": "electron-builder --win nsis portable --x64 -c.publish=never",
+    "dist:win": "electron-builder --win nsis portable --x64",
     "lint": "node --check src/main/main.js"
   },
   "dependencies": {
@@ -43,7 +43,6 @@
     "copyright": "Copyright © 2026",
     "asar": true,
     "asarUnpack": [
-      "**/node_modules/screenshot-desktop/**",
       "**/node_modules/better-sqlite3/**",
       "**/node_modules/sharp/**",
       "**/node_modules/tesseract.js/**",
@@ -68,7 +67,6 @@
       "buildResources": "resources"
     },
     "win": {
-      "publish": null,
       "target": [
         { "target": "nsis", "arch": ["x64"] },
         { "target": "portable", "arch": ["x64"] }

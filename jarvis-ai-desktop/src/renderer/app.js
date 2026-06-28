@@ -15,11 +15,17 @@ $$('.nav').forEach((btn) =>
     const view = btn.dataset.view;
     $$('.view').forEach((v) => v.classList.toggle('hidden', v.dataset.view !== view));
     if (view === 'memory') loadMemory();
+    if (view === 'timeline') loadTimeline();
     if (view === 'corrections') loadCorrections();
     if (view === 'automation') loadDetected();
     if (view === 'settings') loadSettings();
   })
 );
+
+function goToView(view) {
+  const btn = document.querySelector(`.nav[data-view="${view}"]`);
+  if (btn) btn.click();
+}
 
 function toast(msg) {
   const t = $('#toast');
@@ -264,7 +270,99 @@ async function loadDetected() {
   });
 }
 
-// ---------- Settings ----------
+// ---------- Project tags (#6) ----------
+async function loadTagBar() {
+  const bar = $('#tagBar');
+  if (!bar) return;
+  const cfg = await jarvis.config.get();
+  const tags = cfg.tags || [];
+  const active = cfg.activeTag || '';
+  bar.innerHTML = '<span class="tagbar-label">Project:</span>';
+  const mk = (label, value) => {
+    const b = document.createElement('button');
+    b.className = 'tagpill' + (value === active ? ' active' : '');
+    b.textContent = label;
+    b.addEventListener('click', async () => {
+      await jarvis.config.patch({ activeTag: value });
+      loadTagBar();
+      toast(value ? `Project: ${value}` : 'Showing all projects');
+    });
+    return b;
+  };
+  bar.appendChild(mk('All', ''));
+  tags.forEach((t) => bar.appendChild(mk(t, t)));
+  const add = document.createElement('button');
+  add.className = 'tagpill add';
+  add.textContent = '＋ New';
+  add.addEventListener('click', async () => {
+    const name = (prompt('New project label:') || '').trim();
+    if (!name) return;
+    const next = [...new Set([...(cfg.tags || []), name])];
+    await jarvis.config.patch({ tags: next, activeTag: name });
+    loadTagBar();
+  });
+  bar.appendChild(add);
+}
+
+// ---------- Timeline (#4) ----------
+function dayLabel(ms) {
+  const d = new Date(ms);
+  const today = new Date();
+  const y = new Date(today.getTime() - 86400000);
+  if (d.toDateString() === today.toDateString()) return 'Today';
+  if (d.toDateString() === y.toDateString()) return 'Yesterday';
+  return d.toLocaleDateString();
+}
+
+async function loadTimeline() {
+  const rows = await jarvis.timeline.get(200);
+  const list = $('#timelineList');
+  list.innerHTML = '';
+  if (!rows.length) {
+    list.innerHTML = `<div class="empty" style="margin:40px auto">Nothing recorded yet. Turn on Screenshot learning and work for a bit.</div>`;
+    return;
+  }
+  let lastDay = null;
+  rows.forEach((r) => {
+    let meta = {};
+    try { meta = JSON.parse(r.metadata || '{}'); } catch (_) {}
+    const day = dayLabel(r.created_at);
+    if (day !== lastDay) {
+      lastDay = day;
+      const h = document.createElement('div');
+      h.className = 'tl-day';
+      h.textContent = day;
+      list.appendChild(h);
+    }
+    const item = document.createElement('div');
+    item.className = 'tl-item' + (meta.isError ? ' error' : '');
+    const time = new Date(r.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    item.innerHTML = `
+      <div class="tl-time">${time}</div>
+      <div class="tl-dot"></div>
+      <div class="tl-body">
+        <div class="tl-title">${meta.isError ? '⚠ ' : ''}${escapeHtml(r.title || r.source || r.kind)}${r.tag ? ` <span class="tl-tag">${escapeHtml(r.tag)}</span>` : ''}</div>
+        <div class="tl-sub">${escapeHtml(r.kind)}${r.source ? ' · ' + escapeHtml(String(r.source).slice(0, 50)) : ''}</div>
+      </div>`;
+    list.appendChild(item);
+  });
+}
+
+// ---------- Quick-open: triple-Ctrl while focused ----------
+let ctrlTaps = [];
+window.addEventListener('keydown', (e) => {
+  if (e.key !== 'Control') return;
+  const now = Date.now();
+  ctrlTaps = ctrlTaps.filter((t) => now - t < 600);
+  ctrlTaps.push(now);
+  if (ctrlTaps.length >= 3) {
+    ctrlTaps = [];
+    goToView('chat');
+    setTimeout(() => chatInput.focus(), 50);
+  }
+});
+
+
 function rowToggle(key, title, desc, cfg) {
   return `<div class="row"><div class="label"><div class="t">${title}</div><div class="d">${desc}</div></div>
     <label class="switch"><input type="checkbox" data-key="${key}" ${cfg[key] ? 'checked' : ''}/><span class="slider"></span></label></div>`;
@@ -327,6 +425,31 @@ async function loadSettings() {
     </div>
 
     <div class="group">
+      <h3>Projects (#tags)</h3>
+      <div class="row"><div class="label"><div class="t">Project labels</div><div class="d">New captures get tagged with the active project; Ask is scoped to it.</div></div>
+        <div id="tagManage" class="tagmanage"></div></div>
+    </div>
+
+    <div class="group">
+      <h3>Memory housekeeping</h3>
+      ${rowText('memoryRetentionDays', 'Auto-delete after (days)', '0 = keep forever. Corrections & pinned items are always kept', cfg, 'number')}
+      <div class="row"><div class="label"><div class="t">Clean up now</div><div class="d">Apply the rule immediately</div></div>
+        <button id="cleanNowBtn" class="ghost">Clean now</button></div>
+    </div>
+
+    <div class="group">
+      <h3>Errors &amp; alerts</h3>
+      ${rowToggle('errorAlerts', 'Detect on-screen errors', 'Alert when an error appears and suggest a past fix', cfg)}
+    </div>
+
+    <div class="group">
+      <h3>Quick open</h3>
+      <div class="row"><div class="label"><div class="t">Triple-Ctrl</div><div class="d">Tap Ctrl 3× (while JARVIS is focused) to jump to Ask</div></div>
+        <label class="switch"><input type="checkbox" data-key="tripleCtrlOpen" ${cfg.tripleCtrlOpen ? 'checked' : ''}/><span class="slider"></span></label></div>
+      ${rowText('globalHotkey', 'Global shortcut', 'Works anywhere, e.g. Control+Shift+Space (leave blank to disable)', cfg)}
+    </div>
+
+    <div class="group">
       <h3>Data</h3>
       <div class="row danger"><div class="label"><div class="t">Delete all memories</div><div class="d">Permanently erase everything JARVIS has stored. Cannot be undone.</div></div>
         <button id="wipeBtn">Delete everything</button></div>
@@ -336,22 +459,64 @@ async function loadSettings() {
   $$('#settingsBody input[type="checkbox"]').forEach((el) =>
     el.addEventListener('change', () => jarvis.config.patch({ [el.dataset.key]: el.checked }).then(refreshLlmStatus))
   );
-  $$('#settingsBody input[type="text"], #settingsBody input[type="password"], #settingsBody select').forEach((el) => {
+  $$('#settingsBody input[type="text"], #settingsBody input[type="password"], #settingsBody input[type="number"], #settingsBody select').forEach((el) => {
     if (el.readOnly) return;
     el.addEventListener('change', () => {
       let val = el.value;
       if (['excludedApps', 'excludedFolders', 'excludedDomains'].includes(el.dataset.key)) {
         val = el.value.split(',').map((s) => s.trim()).filter(Boolean);
+      } else if (el.type === 'number') {
+        val = Math.max(0, parseInt(el.value, 10) || 0);
       }
       jarvis.config.patch({ [el.dataset.key]: val }).then(refreshLlmStatus);
     });
   });
+  $('#cleanNowBtn').addEventListener('click', async () => {
+    const r = await jarvis.memory.cleanupNow();
+    toast(r.removed ? `Removed ${r.removed} old item(s).` : 'Nothing to remove.');
+  });
+  renderTagManage(cfg);
   $('#wipeBtn').addEventListener('click', async () => {
     if (!confirm('Delete ALL stored memories permanently?')) return;
     await jarvis.privacy.wipe();
     toast('All memories deleted.');
     loadMemory();
   });
+}
+
+function renderTagManage(cfg) {
+  const box = $('#tagManage');
+  if (!box) return;
+  const tags = cfg.tags || [];
+  box.innerHTML = '';
+  tags.forEach((t) => {
+    const pill = document.createElement('span');
+    pill.className = 'tagchip';
+    pill.innerHTML = `${escapeHtml(t)} <button title="Remove" data-t="${escapeHtml(t)}">×</button>`;
+    pill.querySelector('button').addEventListener('click', async () => {
+      const next = tags.filter((x) => x !== t);
+      const patch = { tags: next };
+      if (cfg.activeTag === t) patch.activeTag = '';
+      await jarvis.config.patch(patch);
+      const fresh = await jarvis.config.get();
+      renderTagManage(fresh);
+      loadTagBar();
+    });
+    box.appendChild(pill);
+  });
+  const add = document.createElement('button');
+  add.className = 'ghost';
+  add.textContent = '＋ Add project';
+  add.addEventListener('click', async () => {
+    const name = (prompt('New project label:') || '').trim();
+    if (!name) return;
+    const next = [...new Set([...tags, name])];
+    await jarvis.config.patch({ tags: next });
+    const fresh = await jarvis.config.get();
+    renderTagManage(fresh);
+    loadTagBar();
+  });
+  box.appendChild(add);
 }
 
 // ---------- LLM status ----------
@@ -366,10 +531,31 @@ async function refreshLlmStatus() {
 }
 
 // ---------- Background events ----------
+function showAlert(html, isError) {
+  const bar = $('#alertBar');
+  if (!bar) return;
+  bar.className = 'alertbar' + (isError ? ' error' : '');
+  bar.innerHTML = `<div class="alert-text">${html}</div><button class="alert-x">×</button>`;
+  bar.querySelector('.alert-x').addEventListener('click', () => bar.classList.add('hidden'));
+  clearTimeout(showAlert._t);
+  showAlert._t = setTimeout(() => bar.classList.add('hidden'), 12000);
+}
+
 jarvis.onEvent((p) => {
   if (p.type === 'captured') toast(`Remembered: ${p.title || p.kind}`);
   if (p.type === 'screenshot-learned') toast(`Learned: ${p.task || p.app || 'screen change'}`);
+  if (p.type === 'cleanup') toast(`Cleaned up ${p.removed} old item(s).`);
+  if (p.type === 'quick-open') {
+    goToView('chat');
+    setTimeout(() => chatInput.focus(), 60);
+  }
+  if (p.type === 'error-detected') {
+    const errs = (p.errors || []).join('; ');
+    const sug = p.suggestion ? `<br><span class="alert-sug">Suggestion: ${escapeHtml(String(p.suggestion).slice(0, 160))}</span>` : '';
+    showAlert(`<b>Error detected${p.app ? ' in ' + escapeHtml(p.app) : ''}:</b> ${escapeHtml(errs.slice(0, 160))}${sug}`, true);
+  }
 });
 
+loadTagBar();
 refreshLlmStatus();
 setInterval(refreshLlmStatus, 30000);
