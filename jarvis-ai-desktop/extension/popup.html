@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <style>
+      :root { --ink:#0f131b; --line:#28313f; --text:#e6ebf2; --dim:#97a3b6; --copper:#d9874a; }
+      body { width: 300px; margin: 0; font-family: -apple-system, "Segoe UI", system-ui, sans-serif; background: var(--ink); color: var(--text); padding: 14px; }
+      h1 { font-size: 13px; letter-spacing: .14em; margin: 0 0 12px; color: var(--copper); }
+      button { width: 100%; padding: 10px; margin-bottom: 8px; border: 1px solid var(--line); background: #161c27; color: var(--text); border-radius: 8px; cursor: pointer; font-size: 13px; }
+      button.primary { background: var(--copper); color: #1a0f06; border: 0; font-weight: 600; }
+      button:hover { border-color: var(--dim); }
+      .sep { border-top: 1px solid var(--line); margin: 12px 0; }
+      label { font-size: 11px; color: var(--dim); display: block; margin: 8px 0 4px; }
+      input { width: 100%; box-sizing: border-box; padding: 7px 9px; background: #0b0e14; border: 1px solid var(--line); color: var(--text); border-radius: 7px; font-size: 12px; }
+      .status { font-size: 11px; color: var(--dim); margin-top: 8px; text-align: center; }
+      .status.ok { color: #4cb782; } .status.bad { color: #e0655f; }
+    </style>
+  </head>
+  <body>
+    <h1>◆ JARVIS BRIDGE</h1>
+    <button id="page" class="primary">Send this page</button>
+    <button id="shot">Send screenshot</button>
+    <div class="sep"></div>
+    <input id="q" placeholder="Ask your memory…" />
+    <button id="ask" style="margin-top:8px">Ask</button>
+    <div id="answer" class="status"></div>
+    <div class="sep"></div>
+    <details>
+      <summary style="font-size:12px;color:var(--dim);cursor:pointer">Pairing</summary>
+      <label>Bridge address</label>
+      <input id="url" placeholder="http://127.0.0.1:38217" />
+      <label>Token (from desktop Settings)</label>
+      <input id="token" type="password" placeholder="paste token" />
+      <button id="save" style="margin-top:8px">Save & test</button>
+    </details>
+    <div id="status" class="status"></div>
+    <script src="popup.js"></script>
+  </body>
+</html>
