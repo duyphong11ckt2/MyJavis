@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "JARVIS Bridge",
+  "version": "1.0.0",
+  "description": "Send the active page, selected text, title, DOM text, and on-demand screenshots to your local JARVIS AI Desktop.",
+  "permissions": ["activeTab", "scripting", "storage", "tabs", "contextMenus"],
+  "host_permissions": ["http://127.0.0.1/*"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_popup": "popup.html", "default_title": "JARVIS Bridge" },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
